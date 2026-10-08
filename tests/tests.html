@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="he" dir="ltr">
+<head><meta charset="utf-8"><title>75 Hard tests</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, Consolas, monospace; background: #111; color: #ddd; padding: 16px; }
+  .ok { color: #3ddc84; } .bad { color: #ff4d5e; font-weight: bold; } h1 { font-size: 16px; }
+</style></head>
+<body>
+<h1 id="sum">running…</h1>
+<pre id="out"></pre>
+<script src="../js/day.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/reminders.js"></script>
+<script>
+(function () {
+  const D = Day;
+  const out = document.getElementById('out');
+  const results = { pass: 0, fail: 0, failures: [] };
+
+  function test(name, fn) {
+    try { fn(); results.pass++; out.innerHTML += `<span class="ok">PASS</span> ${name}\n`; }
+    catch (e) {
+      results.fail++; results.failures.push(name + ': ' + e.message);
+      out.innerHTML += `<span class="bad">FAIL</span> ${name}\n    ${e.message}\n`;
+    }
+  }
+  function eq(a, b, msg) {
+    const x = JSON.stringify(a), y = JSON.stringify(b);
+    if (x !== y) throw new Error(`${msg || 'expected'}: got ${x}, want ${y}`);
+  }
+
+  // local-time helper: month is 1-based
+  const T = (y, m, d, h = 12, mi = 0) => new Date(y, m - 1, d, h, mi).getTime();
+  const START = '2026-06-01';
+
+  function fresh(startDate = START) {
+    const s = D.newState();
+    D.startRun(s, startDate, T(2026, 5, 31, 20));
+    return s;
+  }
+  // mark every requirement on a day as done (workouts untimed unless opts say)
+  function fullDay(s, key, now, opts = {}) {
+    D.TASK_IDS.forEach((id) => D.setTask(s, key, now, id, true));
+    D.addWater(s, key, now, D.WATER_GOAL_ML);
+    D.setPages(s, key, now, 10);
+    D.setPhoto(s, key, now, true);
+    D.setWorkout(s, key, now, 'w1', Object.assign({ done: true, outdoor: true }, opts.w1));
+    D.setWorkout(s, key, now, 'w2', Object.assign({ done: true, outdoor: false }, opts.w2));
+  }
+
+  // ---------- date helpers ----------
+  test('logicalDate: 04:59 is still yesterday, 05:00 is today', () => {
+    eq(D.logicalDate(T(2026, 6, 2, 4, 59), 5), '2026-06-01');
+    eq(D.logicalDate(T(2026, 6, 2, 5, 0), 5), '2026-06-02');
+  });
+  test('logicalDate: cutoff crosses month and year', () => {
+    eq(D.logicalDate(T(2026, 7, 1, 2), 5), '2026-06-30');
+    eq(D.logicalDate(T(2027, 1, 1, 0, 30), 5), '2026-12-31');
+  });
+  test('addDays/diffDays: month, year, leap-year and DST-change dates', () => {
+    eq(D.addDays('2026-01-31', 1), '2026-02-01');
+    eq(D.addDays('2026-12-31', 1), '2027-01-01');
+    eq(D.addDays('2028-02-28', 1), '2028-02-29');
+    eq(D.diffDays('2026-03-26', '2026-03-30'), 4);   // Israel DST starts 27 Mar 2026
+    eq(D.diffDays('2026-10-24', '2026-10-27'), 3);   // and ends 25 Oct 2026
+  });
+  test('logicalDate right after a spring-forward hour is not off by one', () => {
+    // 05:30 local on any day must map to that same date regardless of DST.
+    eq(D.logicalDate(T(2026, 3, 27, 5, 30), 5), '2026-03-27');
+    eq(D.logicalDate(T(2026, 10, 25, 5, 30), 5), '2026-10-25');
+  });
+
+  // ---------- phases / start ----------
+  test('phase: unset -> ready -> active, user-chosen start date', () => {
+    const s = D.newState();
+    eq(D.phase(s, T(2026, 5, 31)), 'unset');
+    eq(D.startRun(s, START, T(2026, 5, 31, 20)).ok, true);
+    eq(D.phase(s, T(2026, 5, 31, 20)), 'ready');
+    eq(D.status(s, T(2026, 5, 31, 20)).daysUntilStart, 1);
+    eq(D.phase(s, T(2026, 6, 1, 6)), 'active');
+    eq(D.status(s, T(2026, 6, 1, 6)).dayNumber, 1);
+  });
+  test('startRun rejects a past date and a bad date', () => {
+    const s = D.newState();
+    eq(D.startRun(s, '2026-05-01', T(2026, 5, 31)).error, 'past');
+    eq(D.startRun(s, 'nope', T(2026, 5, 31)).error, 'bad-date');
+  });
+  test('nothing is editable before the start date', () => {
+    const s = fresh();
+    eq(D.setTask(s, '2026-05-31', T(2026, 5, 31, 20), 'meal1', true), false);
+  });
+  test('changeStartDate works only while ready', () => {
+    const s = fresh();
+    eq(D.changeStartDate(s, '2026-06-05', T(2026, 5, 31, 20)).ok, true);
+    eq(s.run.startDate, '2026-06-05');
+    const s2 = fresh();
+    eq(D.changeStartDate(s2, '2026-06-05', T(2026, 6, 1, 9)).error, 'not-ready');
+  });
+
+  // ---------- a good day ----------
+  test('complete day: End my day succeeds, best streak = 1', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    fullDay(s, START, now);
+    const r = D.endDay(s, now);
+    eq(r.ok, true); eq(r.dayNumber, 1);
+    eq(s.best, 1); eq(D.status(s, now).closedToday, true);
+  });
+  test('closed day is locked for edits', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    fullDay(s, START, now); D.endDay(s, now);
+    eq(D.addWater(s, START, now, 500), false);
+    eq(D.endDay(s, now).error, 'already-closed');
+  });
+  test('progress ring: empty 0%, full 100%', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 9);
+    eq(D.progress(s, START).pct, 0);
+    fullDay(s, START, now);
+    eq(D.progress(s, START).pct, 100);
+  });
+
+  test('setMeal ticks the meal task and records the text; rejects non-meal ids and closed days', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 13);
+    eq(D.setMeal(s, START, now, 'meal2', 'סלט טונה'), true);
+    eq(s.days[START].tasks.meal2, true); eq(s.days[START].meals.meal2, 'סלט טונה');
+    eq(D.setMeal(s, START, now, 'water', 'x'), false);
+    eq(D.setMeal(s, '2026-06-02', now, 'meal1', 'x'), false);   // not today
+  });
+
+  // ---------- missing items ----------
+  test('endDay with missing items refuses and changes nothing', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    D.setTask(s, START, now, 'meal1', true);
+    const r = D.endDay(s, now);
+    eq(r.error, 'missing'); eq(r.missing.includes('meal2'), true);
+    eq(s.days[START].closed, null); eq(s.run.attempt, 1);
+  });
+  test('water: 3799 ml fails, 3800 passes', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now); D.addWater(s, START, now, -1);
+    eq(D.evaluateDay(s, START), ['water']);
+    D.addWater(s, START, now, 1);
+    eq(D.evaluateDay(s, START), []);
+  });
+  test('reading: 9 pages fails, 10 passes', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now); D.setPages(s, START, now, 9);
+    eq(D.evaluateDay(s, START), ['read']);
+  });
+  test('outdoor: both workouts indoors fails', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now, { w1: { outdoor: false } });
+    eq(D.evaluateDay(s, START), ['outdoor']);
+  });
+  test('outdoor can be either workout', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now, { w1: { outdoor: false }, w2: { outdoor: true } });
+    eq(D.evaluateDay(s, START), []);
+  });
+  test('workout shorter than 45 min fails; 90 min sports session passes', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now, { w1: { min: 44 }, w2: { min: 90 } });
+    eq(D.evaluateDay(s, START), ['w1min']);
+  });
+  test('workout gap: 2h fails, exactly 3h passes (setting = 3h)', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now, {
+      w1: { startedAt: T(2026, 6, 1, 8), endedAt: T(2026, 6, 1, 8, 45), min: 45 },
+      w2: { startedAt: T(2026, 6, 1, 10, 45), endedAt: T(2026, 6, 1, 11, 30), min: 45 }
+    });
+    eq(D.evaluateDay(s, START), ['gap']);
+    D.setWorkout(s, START, now, 'w2', { startedAt: T(2026, 6, 1, 11, 45), endedAt: T(2026, 6, 1, 12, 30) });
+    eq(D.evaluateDay(s, START), []);
+  });
+  test('gap is measured regardless of which workout is logged first', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now, {
+      w1: { startedAt: T(2026, 6, 1, 18), endedAt: T(2026, 6, 1, 18, 45), min: 45 },
+      w2: { startedAt: T(2026, 6, 1, 17), endedAt: T(2026, 6, 1, 17, 45), min: 45 }
+    });
+    eq(D.evaluateDay(s, START), ['gap']);
+  });
+
+  // ---------- restart (warn -> confirm) ----------
+  test('endDay confirmFail restarts: attempt 2, history logged, new start = tomorrow', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    D.setTask(s, START, now, 'meal1', true);
+    const r = D.endDay(s, now, { confirmFail: true });
+    eq(r.reset, true);
+    eq(s.run.attempt, 2); eq(s.run.startDate, '2026-06-02');
+    eq(s.history.length, 1); eq(s.history[0].dayNumber, 1);
+    eq(D.phase(s, now), 'ready');
+  });
+  test('best streak survives a restart', () => {
+    const s = fresh();
+    [1, 2, 3].forEach((n) => { const now = T(2026, 6, n, 22); fullDay(s, `2026-06-0${n}`, now); D.endDay(s, now); });
+    const now = T(2026, 6, 4, 22);
+    D.endDay(s, now, { confirmFail: true });
+    eq(s.best, 3); eq(s.run.attempt, 2);
+  });
+
+  // ---------- forgot End my day / app not opened ----------
+  test('forgot End my day: complete day auto-closes OK at the next 05:00', () => {
+    const s = fresh();
+    fullDay(s, START, T(2026, 6, 1, 21));
+    D.sync(s, T(2026, 6, 2, 4, 59));
+    eq(s.days[START].closed, null);               // still "yesterday" at 04:59
+    D.sync(s, T(2026, 6, 2, 5, 0));
+    eq(s.days[START].closed.ok, true); eq(s.days[START].closed.auto, true);
+    eq(D.phase(s, T(2026, 6, 2, 5, 0)), 'active');
+    eq(s.best, 1);
+  });
+  test('forgot End my day with a missing item: pending (warn), not an instant reset', () => {
+    const s = fresh();
+    D.setTask(s, START, T(2026, 6, 1, 21), 'meal1', true);
+    D.sync(s, T(2026, 6, 2, 8));
+    eq(D.phase(s, T(2026, 6, 2, 8)), 'pending');
+    eq(s.pending.dayKey, START); eq(s.run.attempt, 1);
+  });
+  test('pending: fixing the mis-tapped item resolves it, no reset', () => {
+    const s = fresh();
+    fullDay(s, START, T(2026, 6, 1, 21));
+    D.setTask(s, START, T(2026, 6, 1, 21), 'noalc', false);      // user thinks they unticked by mistake
+    D.sync(s, T(2026, 6, 2, 8));
+    eq(s.pending.missing, ['noalc']);
+    eq(D.setTask(s, START, T(2026, 6, 2, 8), 'noalc', true), true); // editing yesterday allowed while pending
+    const r = D.reevaluatePending(s, T(2026, 6, 2, 8));
+    eq(r.resolved, true); eq(s.pending, null); eq(s.run.attempt, 1);
+    eq(s.best, 1); eq(D.phase(s, T(2026, 6, 2, 8)), 'active');
+  });
+  test('pending: still-missing item stays pending; confirmReset restarts today', () => {
+    const s = fresh();
+    D.sync(s, T(2026, 6, 3, 8));                    // two days untouched; day 1 fails first
+    eq(s.pending.dayKey, START);
+    eq(D.reevaluatePending(s, T(2026, 6, 3, 8)).resolved, false);
+    const r = D.confirmReset(s, T(2026, 6, 3, 8));
+    eq(r.ok, true); eq(s.run.startDate, '2026-06-03'); eq(s.run.attempt, 2);
+    eq(D.phase(s, T(2026, 6, 3, 8)), 'active');
+  });
+  test('days that were never opened count as failed', () => {
+    const s = fresh();
+    fullDay(s, START, T(2026, 6, 1, 21)); D.endDay(s, T(2026, 6, 1, 22));
+    D.sync(s, T(2026, 6, 4, 9));                    // days 2 and 3 never touched
+    eq(s.pending.dayKey, '2026-06-02');
+    eq(s.best, 1);
+  });
+  test('only the pending day is editable, not older/newer closed days', () => {
+    const s = fresh();
+    fullDay(s, START, T(2026, 6, 1, 21)); D.endDay(s, T(2026, 6, 1, 22));
+    D.sync(s, T(2026, 6, 3, 9));
+    eq(s.pending.dayKey, '2026-06-02');
+    eq(D.canEdit(s, START, T(2026, 6, 3, 9)), false);
+    eq(D.canEdit(s, '2026-06-02', T(2026, 6, 3, 9)), true);
+  });
+
+  // ---------- weekly-limited rule ----------
+  test('weekly rule: once is fine, twice in the same 7-day block fails', () => {
+    const s = fresh(); const now = T(2026, 6, 2, 20);
+    D.logR3(s, START, T(2026, 6, 1, 20));
+    eq(D.weekR3Count(s, '2026-06-02'), 1); eq(D.r3Over(s, '2026-06-02'), false);
+    fullDay(s, '2026-06-02', now);
+    D.logR3(s, '2026-06-02', now);
+    eq(D.evaluateDay(s, '2026-06-02'), ['r3']);
+  });
+  test('weekly rule: day 7 and day 8 are different blocks', () => {
+    const s = fresh(); // day 7 = 06-07, day 8 = 06-08
+    D.logR3(s, '2026-06-07', T(2026, 6, 7, 20));
+    D.logR3(s, '2026-06-08', T(2026, 6, 8, 20));
+    eq(D.weekR3Count(s, '2026-06-08'), 1);
+    eq(D.r3Over(s, '2026-06-08'), false);
+  });
+  test('weekly rule: undo removes one use', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    D.logR3(s, START, now); D.logR3(s, START, now);
+    eq(D.r3Over(s, START), true);
+    D.unlogR3(s, START, now);
+    eq(D.r3Over(s, START), false);
+  });
+  test('weekly rule: uses from a failed attempt do not count in the new run', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    D.logR3(s, START, now);
+    D.endDay(s, now, { confirmFail: true });        // restart at 06-02
+    D.logR3(s, '2026-06-02', T(2026, 6, 2, 20));
+    eq(D.weekR3Count(s, '2026-06-02'), 1);
+  });
+
+  // ---------- full 75 days ----------
+  test('completing day 75 finishes the challenge', () => {
+    const s = fresh(); let last;
+    for (let n = 0; n < 75; n++) {
+      const key = D.addDays(START, n);
+      const [y, m, d] = key.split('-').map(Number);
+      const now = T(y, m, d, 22);
+      fullDay(s, key, now);
+      last = D.endDay(s, now);
+      eq(last.ok, true);
+    }
+    eq(last.completed, true); eq(s.best, 75);
+    eq(D.phase(s, T(2026, 8, 20)), 'complete');
+  });
+
+  // ---------- measurements + milestones ----------
+  test('measurements: add, same-day replace, sorted, invalid rejected, remove', () => {
+    const s = fresh();
+    eq(D.addMeasurement(s, '2026-06-08', 80.44, 90), true);
+    eq(D.addMeasurement(s, '2026-06-01', 82, null), true);
+    eq(D.addMeasurement(s, '2026-06-08', 79.9, 89.5), true);        // replaces 06-08
+    eq(s.measurements.map((m) => m.date), ['2026-06-01', '2026-06-08']);
+    eq(s.measurements[1], { date: '2026-06-08', weight: 79.9, waist: 89.5 });
+    eq(D.addMeasurement(s, '2026-06-09', 0, 0), false);
+    eq(D.addMeasurement(s, 'bad', 80, 90), false);
+    D.removeMeasurement(s, '2026-06-01');
+    eq(s.measurements.length, 1);
+  });
+  test('milestone: due only after day 7 closes OK, once', () => {
+    const s = fresh();
+    for (let n = 0; n < 6; n++) {
+      const key = D.addDays(START, n), [y, m, d] = key.split('-').map(Number), now = T(y, m, d, 22);
+      fullDay(s, key, now); D.endDay(s, now);
+    }
+    eq(D.pendingMilestone(s), null);                                  // 6 days done
+    const now7 = T(2026, 6, 7, 22);
+    fullDay(s, '2026-06-07', now7); D.endDay(s, now7);
+    eq(D.pendingMilestone(s).n, 7);
+    D.markCelebrated(s, D.pendingMilestone(s).id);
+    eq(D.pendingMilestone(s), null);                                  // not shown twice
+  });
+  test('milestone: a failed attempt does not celebrate', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    D.endDay(s, now, { confirmFail: true });
+    eq(D.pendingMilestone(s), null);
+    eq(s.run.attempt, 2);
+  });
+
+  // ---------- reminders ----------
+  test('reminders.due: latest passed, not-done banner cue only', () => {
+    const s = fresh(); const day = D.newDay();
+    eq(Reminders.due(s, day, T(2026, 6, 1, 6, 0)), null);
+    eq(Reminders.due(s, day, T(2026, 6, 1, 7, 30)).id, 'photo');
+    day.photo = true;
+    eq(Reminders.due(s, day, T(2026, 6, 1, 9, 0)).id, 'w1');
+    day.w1.done = true; day.tasks.meal2 = true;
+    eq(Reminders.due(s, day, T(2026, 6, 1, 14, 0)), null);
+    eq(Reminders.due(s, day, T(2026, 6, 1, 17, 30)).id, 'w2');
+    day.w2.done = true; day.tasks.meal3 = true; day.pages = 10;       // phonePm / endday never banner
+    eq(Reminders.due(s, day, T(2026, 6, 1, 23, 0)), null);
+  });
+  test('store: backup parse keeps photos map and normalizes new fields', () => {
+    const s = fresh();
+    const text = JSON.stringify({ app: '75hard', state: s, photos: { '2026-06-01': 'data:image/jpeg;base64,AA' } });
+    const p = Store.parseBackup(text);
+    eq(Object.keys(p.photos), ['2026-06-01']); eq(Array.isArray(p.state.measurements), true);
+    eq(typeof p.state.settings.reminders.photo, 'string');
+  });
+
+  // ---------- storage ----------
+  test('store: export -> import round-trips state', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    fullDay(s, START, now); D.logR3(s, START, now);
+    const back = Store.importJson(Store.exportJson(s));
+    eq(back.days[START].waterMl, D.WATER_GOAL_ML);
+    eq(back.r3Log, [START]); eq(back.run.startDate, START);
+  });
+  test('store: import rejects files that are not 75hard backups', () => {
+    let threw = false;
+    try { Store.importJson('{"hello":1}'); } catch (e) { threw = true; }
+    eq(threw, true);
+  });
+  test('store: normalize fills fields missing from an old save', () => {
+    const old = { v: 1, days: { '2026-06-01': { tasks: { meal1: true } } }, run: null };
+    const s = Store.normalize(old);
+    eq(s.days['2026-06-01'].w1.done, false); eq(s.settings.gapHours, 3); eq(Array.isArray(s.r3Log), true);
+  });
+  test('store: corrupt save is preserved, not overwritten', () => {
+    localStorage.setItem(Store.KEY, '{not json');
+    const r = Store.load();
+    eq(r.error, 'corrupt'); eq(localStorage.getItem(Store.CORRUPT_KEY), '{not json');
+    localStorage.removeItem(Store.KEY); localStorage.removeItem(Store.CORRUPT_KEY);
+  });
+
+  const sum = document.getElementById('sum');
+  sum.textContent = `${results.pass} passed, ${results.fail} failed`;
+  sum.className = results.fail ? 'bad' : 'ok';
+  window.__results = results;
+})();
+</script>
+</body>
+</html>
