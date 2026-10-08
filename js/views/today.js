@@ -1,5 +1,6 @@
-// Today view: start-date screens, the live checklist, workout timers, water,
-// reading, photo, End-my-day and the warn-then-confirm restart dialogs.
+// Today view: start-date screens, the live checklist (meals, workouts, water, reading,
+// photo), a collapsible rules reminder, End-my-day and the warn-then-confirm restart dialogs.
+// Negative rules are honor-system reminders, not checkmarks.
 (function (root) {
   'use strict';
 
@@ -9,9 +10,6 @@
 
   const LABEL = {
     meal1: 'ארוחה 1', meal2: 'ארוחה 2', meal3: 'ארוחה 3',
-    nosnack: 'בלי נשנושים', nosugar: 'בלי סוכר מזוקק וממתקים', nofried: 'בלי מטוגן בשמן עמוק',
-    noflour: 'בלי קמח לבן מזוקק', noalc: 'בלי אלכוהול',
-    phoneAm: 'בלי טלפון 30 דק׳ אחרי ההתעוררות', phonePm: 'בלי טלפון 30 דק׳ לפני השינה',
     water: 'מים: 3.8 ליטר', read: 'קריאה: 10 עמודים', photo: 'תמונת התקדמות',
     w1: 'אימון 1', w2: 'אימון 2', w1min: 'אימון 1 קצר מ-45 דקות', w2min: 'אימון 2 קצר מ-45 דקות',
     outdoor: 'לפחות אימון אחד בחוץ'
@@ -20,8 +18,6 @@
 
   function labelOf(app, id) {
     const s = app.state.settings;
-    if (id === 'rule2') return s.ruleNames.r2;
-    if (id === 'r3') return s.ruleNames.r3;
     if (id === 'gap') return `מרווח של ${s.gapHours} שעות לפחות בין האימונים`;
     return LABEL[id] || id;
   }
@@ -52,7 +48,6 @@
       <label class="field"><span>תאריך התחלה</span>
         <input type="date" id="startDate" value="${val}" min="${st.today}"></label>
       <div class="btns">
-        ${unset ? '' : ''}
         <button class="btn primary" data-act="saveStart">${unset ? 'אישור — מתחילים' : 'עדכון תאריך'}</button>
       </div>
       <p class="hint">היום מסתיים כשאתם לוחצים "סיים את היום", או אוטומטית ב-${String(app.state.settings.cutoffHour).padStart(2, '0')}:00.</p>
@@ -87,11 +82,10 @@
   }
 
   function readHtml(app, day, locked) {
-    const done = day.pages >= D.PAGES_GOAL;
-    return `<button class="task${done ? ' done' : ''}" data-act="openRead" ${locked ? 'disabled' : ''}>
+    return `<button class="task${day.read ? ' done' : ''}" data-act="toggleRead" role="checkbox"
+      aria-checked="${!!day.read}" ${locked ? 'disabled' : ''}>
       <span class="box">✓</span>
-      <span class="txt"><b>10 עמודים עיון</b><small>${day.book ? app.esc(day.book) + ' · ' : ''}ספר פיזי בלבד</small></span>
-      <span class="meta">${day.pages}/10</span></button>`;
+      <span class="txt"><b>קריאה: 10 עמודים</b><small>ספר עיון פיזי בלבד</small></span></button>`;
   }
 
   function photoHtml(app, day, key, locked) {
@@ -104,22 +98,22 @@
     </div>`;
   }
 
-  function r3Html(app, key, locked) {
-    const used = D.weekR3Count(app.state, key), over = used > 1;
-    return `<div class="task r3${over ? ' bad' : ''}">
-      <span class="txt"><b>${app.esc(app.state.settings.ruleNames.r3)}</b>
-      <small>${over ? 'חריגה — היום ייחשב כנכשל' : 'שימושים בשבוע הנוכחי של האתגר'}</small></span>
-      <span class="meta">${used}/1</span>
-      <button class="btn mini" data-act="r3Add" ${locked ? 'disabled' : ''}>+ תיעוד</button>
-      ${used > 0 ? `<button class="btn mini" data-act="r3Undo" ${locked ? 'disabled' : ''}>ביטול</button>` : ''}
-    </div>`;
+  // Honor-system reminders (not tracked): collapsed by default so Today stays short.
+  function rulesCard(app) {
+    const { esc } = app, names = app.state.settings.ruleNames;
+    const digital = Rules.SECTIONS.find((x) => x.id === 'digital');
+    const li = (arr) => arr.map((t) => `<li>${esc(t)}</li>`).join('');
+    return `<details class="card rules-card"><summary>כללים לזכור</summary>
+      <p class="note-l">אלה לא סימונים — פשוט לזכור.</p>
+      <b>אוכל</b><ul class="plain ban">${li(Meals.RULES.banned)}<li>${esc('רק 3 ארוחות + פרי אחד 30–60 דקות לפני אימון')}</li></ul>
+      <b>משמעת</b><ul class="plain">${li(digital ? digital.items : [])}<li>${esc(names.r2)}</li><li>${esc(names.r3)}</li></ul></details>`;
   }
 
   // ===== workouts =====
   function workoutHtml(app, id, key, day, locked) {
     const s = app.state, now = app.now(), w = day[id], other = day[id === 'w1' ? 'w2' : 'w1'];
-    const plan = Schedule.plan(key), title = id === 'w1' ? 'אימון 1 · 45 דק׳' : 'אימון 2 · 45 דק׳';
-    const planned = plan[id];
+    const pl = Schedule.planFor(s, key, id), title = id === 'w1' ? 'אימון 1 · 45 דק׳' : 'אימון 2 · 45 דק׳';
+    const planned = pl.text;
     const timer = s.timer;
     const running = timer && timer.id === id && timer.dayKey === key;
 
@@ -148,12 +142,13 @@
     }
     const dis = locked || block;
     return `<div class="task wk"><span class="txt"><b>${title}</b><small>${app.esc(planned)}</small>
-      ${id === 'w2' && plan.sports ? '<small class="note">אפשר להמשיך ל-90+ דק׳ — ספורט ארוך נחשב אימון 2</small>' : ''}
+      ${id === 'w2' && pl.sports ? '<small class="note">אפשר להמשיך ל-90+ דק׳ — ספורט ארוך נחשב אימון 2</small>' : ''}
       ${block && !locked ? `<small class="note">${block}</small>` : ''}
       <span class="btns wkbtns">
         <button class="btn primary mini" data-act="wkStart" data-id="${id}" data-out="1" ${dis ? 'disabled' : ''}>התחל בחוץ</button>
         <button class="btn mini" data-act="wkStart" data-id="${id}" data-out="0" ${dis ? 'disabled' : ''}>התחל בפנים</button>
-        <button class="btn mini" data-act="wkManual" data-id="${id}" ${locked ? 'disabled' : ''}>סימון ידני</button></span>
+        <button class="btn mini" data-act="wkManual" data-id="${id}" ${locked ? 'disabled' : ''}>סימון ידני</button>
+        <button class="btn mini" data-act="wkSwap" data-id="${id}" ${dis ? 'disabled' : ''}>החלף אימון</button></span>
       </span></div>`;
   }
 
@@ -167,7 +162,6 @@
     const locked = !D.canEdit(s, key, now);
     const p = D.progress(s, key), n = D.dayNumber(s, key);
     const off = C * (1 - p.pct / 100);
-    const r3used = D.weekR3Count(s, key);
 
     const fixBanner = app.fix && s.pending ? `<div class="banner warn">
         <b>מתקנים את יום ${n} (${app.esc(fmtDate(key))})</b>
@@ -189,8 +183,6 @@
 
     const meals = ['meal1', 'meal2', 'meal3'].map((id) => taskHtml(app, id, LABEL[id],
       (day.tasks[id] && day.meals && day.meals[id]) || MEAL_SUB[id], key, locked)).join('');
-    const rules = [['nosnack', 'רק 3 ארוחות + פרי אחד 30–60 דק׳ לפני אימון'], ['nosugar'], ['nofried'], ['noflour'], ['noalc']]
-      .map(([id, sub]) => taskHtml(app, id, LABEL[id], sub, key, locked)).join('');
 
     return `
       <div class="hero">
@@ -205,18 +197,12 @@
         <div class="chip"><b>${st.doneDays}</b><span>ימים שהושלמו</span></div>
         <div class="chip"><b>${s.best}</b><span>רצף שיא</span></div>
         <div class="chip"><b>${st.attempt}</b><span>ניסיון</span></div>
-        <div class="chip${r3used > 1 ? ' bad' : ''}"><b>${r3used}/1</b><span>כלל שבועי</span></div>
       </div>
       ${fixBanner}${closedBanner}${nudge}
-      <section class="group"><h2>אוכל</h2>${meals}${rules}</section>
+      <section class="group"><h2>אוכל</h2>${meals}</section>
       <section class="group"><h2>אימונים</h2>${workoutHtml(app, 'w1', key, day, locked)}${workoutHtml(app, 'w2', key, day, locked)}</section>
       <section class="group"><h2>מים, קריאה ותמונה</h2>${waterHtml(app, day, locked)}${readHtml(app, day, locked)}${photoHtml(app, day, key, locked)}</section>
-      <section class="group"><h2>משמעת</h2>
-        ${taskHtml(app, 'phoneAm', LABEL.phoneAm, 'התראת שעון מותרת — בלי רשתות, חדשות והודעות', key, locked)}
-        ${taskHtml(app, 'phonePm', LABEL.phonePm, '', key, locked)}
-        ${taskHtml(app, 'rule2', s.settings.ruleNames.r2, '', key, locked)}
-        ${r3Html(app, key, locked)}
-      </section>
+      ${rulesCard(app)}
       ${app.fix || st.closedToday ? '' : '<button class="btn primary big" data-act="endDay">סיים את היום</button><p class="hint">לפני השינה. אם משהו חסר — תקבלו אזהרה לפני כל איפוס.</p>'}`;
   }
 
@@ -285,26 +271,10 @@
     });
     app.act('water', (el) => done(D.addWater(s(), key(), now(), Number(el.dataset.ml))));
 
-    // reading
-    app.act('openRead', () => {
-      const day = s().days[key()] || D.newDay();
-      const lastBook = day.book || Object.keys(s().days).sort().reverse().map((k) => s().days[k].book).find(Boolean) || '';
-      app.modal(`<h2>קריאה</h2>
-        <label class="field"><span>כמה עמודים קראתם היום?</span>
-          <input type="number" id="rdPages" inputmode="numeric" min="0" max="999" value="${day.pages || ''}" autofocus></label>
-        <label class="field"><span>שם הספר (עיון, ספר פיזי)</span>
-          <input type="text" id="rdBook" maxlength="120" value="${app.esc(lastBook)}"></label>
-        <label class="field"><span>משפט אחד שלקחתם מהקריאה (לא חובה)</span>
-          <textarea id="rdNote" rows="3" maxlength="500">${app.esc(day.takeaway)}</textarea></label>
-        <div class="btns"><button class="btn" data-act="closeModal">ביטול</button>
-        <button class="btn primary" data-act="readSave">שמירה</button></div>`);
-    });
-    app.act('readSave', () => {
-      const pages = parseInt(document.getElementById('rdPages').value, 10) || 0;
-      const ok = D.setReading(s(), key(), now(), {
-        pages, book: document.getElementById('rdBook').value.trim(), takeaway: document.getElementById('rdNote').value.trim()
-      });
-      app.closeModal(); done(ok);
+    // reading: just a checkmark
+    app.act('toggleRead', () => {
+      const cur = !!(s().days[key()] && s().days[key()].read);
+      done(D.setRead(s(), key(), now(), !cur));
     });
 
     // photo
@@ -324,17 +294,6 @@
       ok: 'מחיקה', danger: true,
       onOk: () => { const k = key(); Photos.remove(k).catch(() => {}); Photos.dropUrl(k); done(D.setPhoto(s(), k, now(), false)); }
     }));
-
-    // weekly rule
-    app.act('r3Add', () => {
-      const add = () => done(D.logR3(s(), key(), now()));
-      if (D.weekR3Count(s(), key()) >= 1) {
-        app.confirm({ title: 'זה יהיה השימוש השני בשבוע',
-          body: 'מעבר למותר לפי הכללים. היום ייחשב כנכשל, ובסופו תקבלו אזהרה לפני איפוס. לתעד בכל זאת?',
-          ok: 'תעד', danger: true, onOk: add });
-      } else add();
-    });
-    app.act('r3Undo', () => done(D.unlogR3(s(), key(), now())));
 
     // workouts
     app.act('wkStart', (el) => {
@@ -362,9 +321,9 @@
     app.act('wkReset', (el) => done(D.setWorkout(s(), key(), now(), el.dataset.id,
       { done: false, outdoor: false, startedAt: null, endedAt: null, min: undefined })));
     app.act('wkManual', (el) => {
-      const id = el.dataset.id, plan = Schedule.plan(key());
+      const id = el.dataset.id, pl = Schedule.planFor(s(), key(), id);
       app.modal(`<h2>סימון ידני — אימון ${id === 'w1' ? '1' : '2'}</h2>
-        <p class="hint-l">${app.esc(plan[id])}</p>
+        <p class="hint-l">${app.esc(pl.text)}</p>
         <label class="field"><span>משך בדקות</span>
           <input type="number" id="mnMin" inputmode="numeric" min="1" max="300" value="45" autofocus></label>
         <label class="check"><input type="checkbox" id="mnOut" ${id === 'w1' ? 'checked' : ''}> האימון היה בחוץ (לגמרי)</label>
@@ -378,6 +337,29 @@
       const ok = D.setWorkout(s(), key(), now(), el.dataset.id, { done: true, outdoor: document.getElementById('mnOut').checked, min });
       app.closeModal(); done(ok);
     });
+
+    // swap today's session for another (or type your own)
+    app.act('wkSwap', (el) => {
+      const id = el.dataset.id, cur = Schedule.planFor(s(), key(), id);
+      const opts = Schedule.options();
+      app.modal(`<h2>החלפת אימון ${id === 'w1' ? '1' : '2'}</h2>
+        <p class="hint-l">עכשיו: ${app.esc(cur.text)}</p>
+        <div class="opts">${opts.map((o, i) => `<button class="opt-btn${o.text === cur.text ? ' on' : ''}" data-act="wkSwapPick" data-id="${id}" data-i="${i}">${app.esc(o.text)}</button>`).join('')}</div>
+        <label class="field"><span>או כתבו אימון משלכם</span>
+          <input type="text" id="wkCustom" maxlength="120" placeholder="למשל: שחייה, אופניים..."></label>
+        <div class="btns col">
+          <button class="btn primary" data-act="wkSwapCustom" data-id="${id}">שמירת אימון משלי</button>
+          ${cur.source === 'day' ? `<button class="btn" data-act="wkSwapClear" data-id="${id}">חזרה לתוכנית הרגילה של היום</button>` : ''}
+          <button class="btn" data-act="closeModal">ביטול</button></div>`);
+    });
+    const swapTo = (id, text) => { app.closeModal(); done(D.setWorkoutPlan(s(), key(), now(), id, text)); };
+    app.act('wkSwapPick', (el) => swapTo(el.dataset.id, Schedule.options()[Number(el.dataset.i)].text));
+    app.act('wkSwapCustom', (el) => {
+      const t = document.getElementById('wkCustom').value.trim();
+      if (!t) { app.toast('כתבו שם לאימון'); return; }
+      swapTo(el.dataset.id, t);
+    });
+    app.act('wkSwapClear', (el) => swapTo(el.dataset.id, ''));
 
     // end of day + failed-day flows
     app.act('endDay', () => {

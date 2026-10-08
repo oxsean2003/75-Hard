@@ -7,15 +7,14 @@
 
   const TOTAL_DAYS = 75;
   const WATER_GOAL_ML = 3800;
-  const PAGES_GOAL = 10;
   const WORKOUT_MIN = 45;
   const DAY_MS = 86400000;
   const MILESTONES = [7, 25, 50, 75];
 
-  // Simple "kept all day / done" checkboxes. Water, pages, photo and workouts
-  // have richer data and are evaluated separately in evaluateDay().
-  const TASK_IDS = ['meal1', 'meal2', 'meal3', 'nosnack', 'nosugar', 'nofried',
-    'noflour', 'noalc', 'phoneAm', 'phonePm', 'rule2'];
+  // Checkbox tasks. Negative rules (no snacking/sugar/alcohol, phone windows, personal
+  // rules) are honor-system reminders, NOT tracked. Water, reading, photo and workouts
+  // are evaluated separately in evaluateDay().
+  const TASK_IDS = ['meal1', 'meal2', 'meal3'];
 
   // ---- date helpers (date-only math in UTC so DST can't skew day counts) ----
   const pad = (n) => String(n).padStart(2, '0');
@@ -42,11 +41,11 @@
         glassMl: 250,
         // time cues for in-app banners and the iOS Reminders list (HH:MM, editable)
         reminders: { photo: '07:00', w1: '08:30', lunch: '13:00', w2: '17:00', dinner: '19:30', read: '21:00', phonePm: '22:00', endday: '22:30' },
-        ruleNames: { r2: 'כלל אישי 2', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' }
+        ruleNames: { r2: 'כלל אישי 2', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' },  // reminder text only
+        weekPlan: [null, null, null, null, null, null, null]  // per weekday (0=Sun): { w1, w2 } text, null = calendar default
       },
       run: null,            // { attempt, startDate, startedAtMs }
       days: {},             // dayKey -> day record
-      r3Log: [],            // dayKeys on which the weekly-limited rule was used
       history: [],          // one entry per failed attempt
       best: 0,              // best completed-day streak ever
       pending: null,        // { dayKey, missing[], auto } awaiting fix-or-confirm
@@ -63,11 +62,9 @@
       tasks: {},
       meals: {},            // meal1..3 -> short text of what was eaten (from the meal guide)
       waterMl: 0,
-      pages: 0,
-      book: '',
-      takeaway: '',
+      read: false,          // 10 pages of a physical non-fiction book: just a checkmark
       photo: false,
-      w1: { done: false, outdoor: false },
+      w1: { done: false, outdoor: false },   // + optional plan (text override), min, startedAt, endedAt
       w2: { done: false, outdoor: false },
       closed: null          // { at, ok, auto, missing[] }
     };
@@ -106,17 +103,6 @@
     return { ok: true };
   }
 
-  // ---- weekly-limited rule (max 1 per 7-day block of the run: days 1-7, 8-14, ...) ----
-  const weekIndex = (s, key) => Math.floor((dayNumber(s, key) - 1) / 7);
-
-  function weekR3Count(state, key) {
-    if (!state.run) return 0;
-    const w = weekIndex(state, key);
-    return state.r3Log.filter((e) => diffDays(state.run.startDate, e) >= 0
-      && diffDays(e, key) >= 0 && weekIndex(state, e) === w).length;
-  }
-  const r3Over = (state, key) => weekR3Count(state, key) > 1;
-
   function canEdit(state, key, now) {
     if (!state.run) return false;
     if (state.pending && state.pending.dayKey === key) return true; // fix a mis-tap
@@ -130,7 +116,7 @@
     const missing = [];
     TASK_IDS.forEach((id) => { if (!day.tasks[id]) missing.push(id); });
     if (day.waterMl < WATER_GOAL_ML) missing.push('water');
-    if (day.pages < PAGES_GOAL) missing.push('read');
+    if (!day.read) missing.push('read');
     if (!day.photo) missing.push('photo');
 
     ['w1', 'w2'].forEach((id) => {
@@ -146,7 +132,6 @@
       const [first, second] = a.startedAt <= b.startedAt ? [a, b] : [b, a];
       if (second.startedAt - first.endedAt < state.settings.gapHours * 3600000) missing.push('gap');
     }
-    if (r3Over(state, key)) missing.push('r3');
     return missing;
   }
 
@@ -234,6 +219,23 @@
     return { ok: true, startDate: newStart, attempt: state.run.attempt };
   }
 
+  // Honor-system restart: the user says they broke a rule. Today's record stays with the
+  // failed attempt; the new Day 1 is tomorrow (same convention as confirming a failed day).
+  function manualRestart(state, now) {
+    if (!state.run || state.completedAt) return { ok: false, error: 'no-run' };
+    if (state.pending) return { ok: false, error: 'pending' };
+    const t = today(state, now);
+    if (diffDays(state.run.startDate, t) < 0) return { ok: false, error: 'not-started' };
+    state.history.push({
+      attempt: state.run.attempt, startDate: state.run.startDate,
+      failedDay: t, dayNumber: dayNumber(state, t), missing: ['manual'], at: now
+    });
+    const startDate = addDays(t, 1);
+    state.run = { attempt: state.run.attempt + 1, startDate, startedAtMs: now };
+    state.timer = null;
+    return { ok: true, startDate, attempt: state.run.attempt };
+  }
+
   // ---- edits (all guarded so closed/past days can't be altered by accident) ----
   function edit(state, key, now, fn) {
     if (!canEdit(state, key, now)) return false;
@@ -245,25 +247,15 @@
   // Log a meal from the guide: ticks the meal task and remembers what it was.
   const setMeal = (s, key, now, id, text) => ['meal1', 'meal2', 'meal3'].includes(id)
     && edit(s, key, now, (d) => { d.tasks[id] = true; d.meals[id] = String(text || '').slice(0, 200); });
-  const addWater =(s, key, now, ml) => edit(s, key, now, (d) => { d.waterMl = Math.max(0, d.waterMl + ml); });
-  const setPages = (s, key, now, n) => edit(s, key, now, (d) => { d.pages = Math.max(0, Math.floor(n) || 0); });
+  const addWater = (s, key, now, ml) => edit(s, key, now, (d) => { d.waterMl = Math.max(0, d.waterMl + ml); });
   const setPhoto = (s, key, now, has) => edit(s, key, now, (d) => { d.photo = !!has; });
-  const setReading = (s, key, now, r) => edit(s, key, now, (d) => {
-    d.pages = Math.max(0, Math.floor(r.pages) || 0);
-    d.book = String(r.book || '').slice(0, 120);
-    d.takeaway = String(r.takeaway || '').slice(0, 500);
-  });
+  const setRead = (s, key, now, val) => edit(s, key, now, (d) => { d.read = !!val; });
   const setWorkout = (s, key, now, id, patch) => (id === 'w1' || id === 'w2')
     && edit(s, key, now, (d) => { Object.assign(d[id], patch); });
-  function logR3(state, key, now) {
-    return edit(state, key, now, () => { state.r3Log.push(key); });
-  }
-  function unlogR3(state, key, now) {
-    return edit(state, key, now, () => {
-      const i = state.r3Log.lastIndexOf(key);
-      if (i >= 0) state.r3Log.splice(i, 1);
-    });
-  }
+  // Swap which session you do today (text; '' = back to the plan). Not once it's done.
+  const setWorkoutPlan = (s, key, now, id, text) => (id === 'w1' || id === 'w2')
+    && !(s.days[key] && s.days[key][id].done)
+    && edit(s, key, now, (d) => { d[id].plan = String(text || '').trim().slice(0, 120); });
 
   // ---- measurements (not tied to the day lifecycle: can be added/edited any time) ----
   function addMeasurement(state, dateKey, weight, waist) {
@@ -294,12 +286,12 @@
   function markCelebrated(state, id) { if (!state.celebrated.includes(id)) state.celebrated.push(id); }
 
   // ---- derived view data ----
-  // Ring: 11 checkbox tasks + 2 workouts + reading + photo + fractional water.
+  // Ring: 3 meals + 2 workouts + reading + photo + fractional water.
   function progress(state, key) {
     const day = state.days[key] || newDay();
     const done = TASK_IDS.filter((id) => day.tasks[id]).length
       + (day.w1.done ? 1 : 0) + (day.w2.done ? 1 : 0)
-      + (day.pages >= PAGES_GOAL ? 1 : 0) + (day.photo ? 1 : 0);
+      + (day.read ? 1 : 0) + (day.photo ? 1 : 0);
     const total = TASK_IDS.length + 4;
     const water = Math.min(day.waterMl / WATER_GOAL_ML, 1);
     return { done, total, water, pct: Math.round(((done + water) / (total + 1)) * 100) };
@@ -323,12 +315,12 @@
   }
 
   const api = {
-    TOTAL_DAYS, MILESTONES, WATER_GOAL_ML, PAGES_GOAL, WORKOUT_MIN, TASK_IDS,
+    TOTAL_DAYS, MILESTONES, WATER_GOAL_ML, WORKOUT_MIN, TASK_IDS,
     addDays, diffDays, logicalDate, newState, newDay, ensureDay, dayNumber, phase, status,
-    startRun, changeStartDate, weekR3Count, r3Over, canEdit, evaluateDay, sync, endDay,
-    reevaluatePending, confirmReset, progress,
+    startRun, changeStartDate, canEdit, evaluateDay, sync, endDay,
+    reevaluatePending, confirmReset, manualRestart, progress,
     addMeasurement, removeMeasurement, pendingMilestone, markCelebrated,
-    setTask, setMeal, addWater, setPages, setPhoto, setReading, setWorkout, logR3, unlogR3
+    setTask, setMeal, addWater, setPhoto, setRead, setWorkout, setWorkoutPlan
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Day = api;

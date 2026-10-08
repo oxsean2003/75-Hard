@@ -7,15 +7,21 @@
   const KEY = '75hard:state';
   const CORRUPT_KEY = '75hard:state:corrupt';
 
+  // Storage backend. Tests inject an in-memory stand-in (useBackend) so they can never
+  // read, overwrite or delete the real save — the test page is served from the same origin.
+  let backend = null;
+  const ls = () => backend || root.localStorage;
+  const useBackend = (b) => { backend = b || null; };
+
   function load() {
     let raw = null;
-    try { raw = root.localStorage.getItem(KEY); } catch (e) { return { state: root.Day.newState(), error: 'unavailable' }; }
+    try { raw = ls().getItem(KEY); } catch (e) { return { state: root.Day.newState(), error: 'unavailable' }; }
     if (!raw) return { state: root.Day.newState(), error: null };
     try {
       return { state: normalize(JSON.parse(raw)), error: null };
     } catch (e) {
       // Never silently overwrite unreadable data: keep the raw copy for recovery.
-      try { root.localStorage.setItem(CORRUPT_KEY, raw); } catch (e2) { /* nothing more to do */ }
+      try { ls().setItem(CORRUPT_KEY, raw); } catch (e2) { /* nothing more to do */ }
       return { state: root.Day.newState(), error: 'corrupt' };
     }
   }
@@ -23,27 +29,35 @@
   // Fill any fields missing from older saves so the rest of the app can rely on shape.
   function normalize(s) {
     if (!s || typeof s !== 'object' || s.v !== 1 || typeof s.days !== 'object') throw new Error('bad state');
-    const base = root.Day.newState();
-    const out = Object.assign(base, s);
-    out.settings = Object.assign(base.settings, s.settings);
-    out.settings.ruleNames = Object.assign(base.settings.ruleNames, (s.settings || {}).ruleNames);
-    out.settings.reminders = Object.assign(base.settings.reminders, (s.settings || {}).reminders);
+    // `defaults` stays pristine: merging INTO it (not into the saved objects) is what makes
+    // settings added in later versions appear on older saves.
+    const defaults = root.Day.newState().settings, saved = s.settings || {};
+    const out = Object.assign(root.Day.newState(), s);
+    out.settings = Object.assign({}, defaults, saved);
+    out.settings.ruleNames = Object.assign({}, defaults.ruleNames, saved.ruleNames);
+    out.settings.reminders = Object.assign({}, defaults.reminders, saved.reminders);
+    out.settings.weekPlan = Array.isArray(saved.weekPlan) && saved.weekPlan.length === 7 ? saved.weekPlan : defaults.weekPlan;
     out.measurements = Array.isArray(s.measurements) ? s.measurements : [];
     out.celebrated = Array.isArray(s.celebrated) ? s.celebrated : [];
-    out.r3Log = Array.isArray(s.r3Log) ? s.r3Log : [];
+    delete out.r3Log;                                   // weekly rule was removed
     out.history = Array.isArray(s.history) ? s.history : [];
     Object.keys(out.days).forEach((k) => {
       const d = out.days[k];
+      // Older saves tracked pages/book/takeaway and many "kept" checkboxes; reading is now
+      // just a checkmark (carry over a finished day), the rest is ignored.
+      const read = typeof d.read === 'boolean' ? d.read : Number(d.pages) >= 10;
       out.days[k] = Object.assign(root.Day.newDay(), d, {
+        read,
         w1: Object.assign({ done: false, outdoor: false }, d.w1),
         w2: Object.assign({ done: false, outdoor: false }, d.w2)
       });
+      ['pages', 'book', 'takeaway'].forEach((f) => { delete out.days[k][f]; });
     });
     return out;
   }
 
   function save(state) {
-    try { root.localStorage.setItem(KEY, JSON.stringify(state)); return true; } catch (e) { return false; }
+    try { ls().setItem(KEY, JSON.stringify(state)); return true; } catch (e) { return false; }
   }
 
   const exportJson = (state) => JSON.stringify({ app: '75hard', exportedAt: Date.now(), state }, null, 2);
@@ -62,7 +76,7 @@
     catch (e) { return Promise.resolve(false); }
   }
 
-  const api = { KEY, CORRUPT_KEY, load, save, normalize, exportJson, parseBackup, importJson, requestPersistence };
+  const api = { KEY, CORRUPT_KEY, useBackend, load, save, normalize, exportJson, parseBackup, importJson, requestPersistence };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Store = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

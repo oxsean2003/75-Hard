@@ -132,6 +132,8 @@
     App.toast('הנתונים השמורים לא נקראו — נשמר עותק גולמי לשחזור.', 8000);
   }
   Object.values(Views).forEach((v) => { if (v.wire) v.wire(App); });
+  // A day that was waiting for a decision may only have failed on rules that are no longer tracked.
+  if (App.state.pending) D.reevaluatePending(App.state, App.now());
   D.sync(App.state, App.now());
   App.commit();
   App.render();

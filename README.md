@@ -3,7 +3,8 @@
 A Hebrew, right-to-left web app for the 75 Hard challenge. Installs on an iPhone home screen (also works in a desktop browser). No server, no accounts, no build step: static files only. **All data and photos stay on the device** (localStorage + IndexedDB).
 
 ## What it does
-- Daily checklist built from the personal rule set: 3 meals, diet confirmations, two 45-minute workouts (≥1 outdoors, enforced gap), 3.8 L water, 10 pages, progress photo, discipline rules, and a weekly-limited rule.
+- Daily checklist of the things you *do*: 3 meals, two 45-minute workouts (≥1 outdoors, enforced gap), 3.8 L water, reading ✓, progress photo. The negative rules (no snacking/sugar/alcohol, phone-free windows, personal rules) are **honor-system reminders** — a collapsible "כללים לזכור" card on Today and the Rules page — not checkmarks. Slipped? **עוד ← הגדרות/גיבוי ← התחל מחדש מיום 1**.
+- Workouts are interchangeable: swap a session for the day on Today ("החלף אימון", or type your own), and set your default session for each weekday under **עוד ← תוכנית אימונים**.
 - You choose the start date. Press **"סיים את היום"** when you go to sleep; if you forget, the day closes automatically at 05:00 (configurable).
 - A missed item never resets silently: you get a warning, can fix a mis-tap, and only a confirmation restarts from Day 1. Best streak and every failed attempt are kept.
 - Workout timers, meal guide (logs meals to the checklist), 7-day training calendar, 45-minute routines, exercise library, rules page.

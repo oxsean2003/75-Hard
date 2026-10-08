@@ -1,5 +1,5 @@
 // Progress tab: photos (grid, compare, slideshow), weekly measurements with charts,
-// reading log, milestones and the history of attempts. Also the milestone dialog.
+// milestones and the history of attempts. Also the milestone dialog.
 (function (root) {
   'use strict';
 
@@ -62,16 +62,6 @@
     </section>`;
   }
 
-  function readingHtml(app) {
-    const { esc } = app, s = app.state;
-    const days = Object.keys(s.days).filter((k) => s.days[k].pages > 0).sort().reverse();
-    const total = days.reduce((a, k) => a + s.days[k].pages, 0);
-    if (!days.length) return '';
-    return `<section class="group"><h2>יומן קריאה · ${total} עמודים</h2>
-      ${days.slice(0, 20).map((k) => { const d = s.days[k]; return `<div class="card rd"><b>${esc(fmtShort(k))} · ${d.pages} עמ׳</b>
-        ${d.book ? `<span>${esc(d.book)}</span>` : ''}${d.takeaway ? `<p>${esc(d.takeaway)}</p>` : ''}</div>`; }).join('')}</section>`;
-  }
-
   function historyHtml(app, st) {
     const { esc } = app, h = app.state.history;
     if (!h.length) return '';
@@ -98,7 +88,7 @@
         <div class="chip"><b>${st.attempt || '—'}</b><span>ניסיון</span></div></div>
       ${milestonesHtml(app)}
       <section class="group"><h2>תמונות</h2><div id="photoArea"><p class="note-l">טוען…</p></div></section>
-      ${measureHtml(app, st)}${readingHtml(app)}${historyHtml(app, st)}`;
+      ${measureHtml(app, st)}${historyHtml(app, st)}`;
   }
 
   // ---- photos (async: IndexedDB) ----

@@ -10,7 +10,7 @@
     { id: 'lunch',   label: 'ארוחת צהריים',                      banner: true,  done: (d) => !!d.tasks.meal2 },
     { id: 'w2',      label: 'אימון 2',                           banner: true,  done: (d) => d.w2.done },
     { id: 'dinner',  label: 'ארוחת ערב',                         banner: true,  done: (d) => !!d.tasks.meal3 },
-    { id: 'read',    label: '10 עמודי קריאה',                    banner: true,  done: (d) => d.pages >= 10 },
+    { id: 'read',    label: '10 עמודי קריאה',                    banner: true,  done: (d) => !!d.read },
     { id: 'phonePm', label: 'בלי טלפון: 30 דקות לפני השינה',     banner: false },
     { id: 'endday',  label: 'לסיים את היום באפליקציה',           banner: false }
   ];

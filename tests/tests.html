@@ -11,11 +11,14 @@
 <script src="../js/day.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/reminders.js"></script>
+<script src="../data/workouts.he.js"></script>
+<script src="../data/schedule.he.js"></script>
 <script>
 (function () {
   const D = Day;
   const out = document.getElementById('out');
   const results = { pass: 0, fail: 0, failures: [] };
+  const REAL_KEYS_BEFORE = Object.keys(localStorage).filter((k) => k.startsWith('75hard:')).length;
 
   function test(name, fn) {
     try { fn(); results.pass++; out.innerHTML += `<span class="ok">PASS</span> ${name}\n`; }
@@ -42,7 +45,7 @@
   function fullDay(s, key, now, opts = {}) {
     D.TASK_IDS.forEach((id) => D.setTask(s, key, now, id, true));
     D.addWater(s, key, now, D.WATER_GOAL_ML);
-    D.setPages(s, key, now, 10);
+    D.setRead(s, key, now, true);
     D.setPhoto(s, key, now, true);
     D.setWorkout(s, key, now, 'w1', Object.assign({ done: true, outdoor: true }, opts.w1));
     D.setWorkout(s, key, now, 'w2', Object.assign({ done: true, outdoor: false }, opts.w2));
@@ -141,10 +144,20 @@
     D.addWater(s, START, now, 1);
     eq(D.evaluateDay(s, START), []);
   });
-  test('reading: 9 pages fails, 10 passes', () => {
+  test('reading is a plain checkmark: unchecked fails, checked passes', () => {
     const s = fresh(); const now = T(2026, 6, 1, 20);
-    fullDay(s, START, now); D.setPages(s, START, now, 9);
+    fullDay(s, START, now); D.setRead(s, START, now, false);
     eq(D.evaluateDay(s, START), ['read']);
+    D.setRead(s, START, now, true);
+    eq(D.evaluateDay(s, START), []);
+  });
+  test('negative rules are not tracked: no checkbox ids, nothing else is required', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 20);
+    eq(D.TASK_IDS, ['meal1', 'meal2', 'meal3']);
+    eq(D.setTask(s, START, now, 'nosnack', true), false);
+    eq(D.setTask(s, START, now, 'rule2', true), false);
+    fullDay(s, START, now);
+    eq(D.evaluateDay(s, START), []);          // a day with only the positive tasks is complete
   });
   test('outdoor: both workouts indoors fails', () => {
     const s = fresh(); const now = T(2026, 6, 1, 20);
@@ -219,10 +232,10 @@
   test('pending: fixing the mis-tapped item resolves it, no reset', () => {
     const s = fresh();
     fullDay(s, START, T(2026, 6, 1, 21));
-    D.setTask(s, START, T(2026, 6, 1, 21), 'noalc', false);      // user thinks they unticked by mistake
+    D.setTask(s, START, T(2026, 6, 1, 21), 'meal3', false);      // user thinks they unticked by mistake
     D.sync(s, T(2026, 6, 2, 8));
-    eq(s.pending.missing, ['noalc']);
-    eq(D.setTask(s, START, T(2026, 6, 2, 8), 'noalc', true), true); // editing yesterday allowed while pending
+    eq(s.pending.missing, ['meal3']);
+    eq(D.setTask(s, START, T(2026, 6, 2, 8), 'meal3', true), true); // editing yesterday allowed while pending
     const r = D.reevaluatePending(s, T(2026, 6, 2, 8));
     eq(r.resolved, true); eq(s.pending, null); eq(s.run.attempt, 1);
     eq(s.best, 1); eq(D.phase(s, T(2026, 6, 2, 8)), 'active');
@@ -252,37 +265,51 @@
     eq(D.canEdit(s, '2026-06-02', T(2026, 6, 3, 9)), true);
   });
 
-  // ---------- weekly-limited rule ----------
-  test('weekly rule: once is fine, twice in the same 7-day block fails', () => {
-    const s = fresh(); const now = T(2026, 6, 2, 20);
-    D.logR3(s, START, T(2026, 6, 1, 20));
-    eq(D.weekR3Count(s, '2026-06-02'), 1); eq(D.r3Over(s, '2026-06-02'), false);
-    fullDay(s, '2026-06-02', now);
-    D.logR3(s, '2026-06-02', now);
-    eq(D.evaluateDay(s, '2026-06-02'), ['r3']);
+  // ---------- honor-system restart ----------
+  test('manualRestart: history entry, attempt+1, new Day 1 tomorrow, best kept, timer cleared', () => {
+    const s = fresh();
+    const n1 = T(2026, 6, 1, 22); fullDay(s, START, n1); D.endDay(s, n1);
+    const n2 = T(2026, 6, 2, 15);
+    s.timer = { id: 'w1', dayKey: '2026-06-02', startedAt: n2, outdoor: true };
+    const r = D.manualRestart(s, n2);
+    eq(r.ok, true); eq(r.startDate, '2026-06-03'); eq(r.attempt, 2);
+    eq(s.history.length, 1); eq(s.history[0].dayNumber, 2); eq(s.history[0].missing, ['manual']);
+    eq(s.best, 1); eq(s.timer, null);
+    eq(D.phase(s, n2), 'ready');
   });
-  test('weekly rule: day 7 and day 8 are different blocks', () => {
-    const s = fresh(); // day 7 = 06-07, day 8 = 06-08
-    D.logR3(s, '2026-06-07', T(2026, 6, 7, 20));
-    D.logR3(s, '2026-06-08', T(2026, 6, 8, 20));
-    eq(D.weekR3Count(s, '2026-06-08'), 1);
-    eq(D.r3Over(s, '2026-06-08'), false);
-  });
-  test('weekly rule: undo removes one use', () => {
-    const s = fresh(); const now = T(2026, 6, 1, 20);
-    D.logR3(s, START, now); D.logR3(s, START, now);
-    eq(D.r3Over(s, START), true);
-    D.unlogR3(s, START, now);
-    eq(D.r3Over(s, START), false);
-  });
-  test('weekly rule: uses from a failed attempt do not count in the new run', () => {
-    const s = fresh(); const now = T(2026, 6, 1, 22);
-    D.logR3(s, START, now);
-    D.endDay(s, now, { confirmFail: true });        // restart at 06-02
-    D.logR3(s, '2026-06-02', T(2026, 6, 2, 20));
-    eq(D.weekR3Count(s, '2026-06-02'), 1);
+  test('manualRestart refuses before the start date, while pending, and with no run', () => {
+    eq(D.manualRestart(D.newState(), T(2026, 6, 1)).error, 'no-run');
+    eq(D.manualRestart(fresh(), T(2026, 5, 31, 20)).error, 'not-started');
+    const s = fresh(); D.sync(s, T(2026, 6, 2, 8));          // day 1 untouched -> pending
+    eq(D.manualRestart(s, T(2026, 6, 2, 8)).error, 'pending');
   });
 
+  // ---------- interchangeable workouts ----------
+  test('planFor precedence: day override > weekly plan > calendar default', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 9);                 // 2026-06-01 is a Monday
+    const dflt = Schedule.planFor(s, START, 'w2');
+    eq(dflt.source, 'default'); eq(dflt.text, Schedule.DAYS[1].w2);
+    s.settings.weekPlan[1] = { w2: 'שחייה' };
+    eq(Schedule.planFor(s, START, 'w2'), { text: 'שחייה', sports: false, source: 'week' });
+    eq(Schedule.planFor(s, START, 'w1').source, 'default');          // only w2 was overridden
+    eq(D.setWorkoutPlan(s, START, now, 'w2', 'כדורסל עם חברים'), true);
+    eq(Schedule.planFor(s, START, 'w2'), { text: 'כדורסל עם חברים', sports: true, source: 'day' });
+    D.setWorkoutPlan(s, START, now, 'w2', '');                        // clear -> back to the weekly plan
+    eq(Schedule.planFor(s, START, 'w2').source, 'week');
+  });
+  test('setWorkoutPlan: refused once the workout is done, on other days and for bad ids', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 9);
+    D.setWorkout(s, START, now, 'w1', { done: true });
+    eq(D.setWorkoutPlan(s, START, now, 'w1', 'x'), false);
+    eq(D.setWorkoutPlan(s, '2026-06-02', now, 'w2', 'x'), false);
+    eq(D.setWorkoutPlan(s, START, now, 'water', 'x'), false);
+  });
+  test('Schedule.options: distinct sessions + routines, sports flagged', () => {
+    const o = Schedule.options();
+    eq(new Set(o.map((x) => x.text)).size, o.length);
+    eq(o.some((x) => x.text.startsWith('אפשרות א׳')), true);
+    eq(o.filter((x) => x.sports).length >= 1, true);
+  });
   // ---------- full 75 days ----------
   test('completing day 75 finishes the challenge', () => {
     const s = fresh(); let last;
@@ -341,7 +368,7 @@
     day.w1.done = true; day.tasks.meal2 = true;
     eq(Reminders.due(s, day, T(2026, 6, 1, 14, 0)), null);
     eq(Reminders.due(s, day, T(2026, 6, 1, 17, 30)).id, 'w2');
-    day.w2.done = true; day.tasks.meal3 = true; day.pages = 10;       // phonePm / endday never banner
+    day.w2.done = true; day.tasks.meal3 = true; day.read = true;      // phonePm / endday never banner
     eq(Reminders.due(s, day, T(2026, 6, 1, 23, 0)), null);
   });
   test('store: backup parse keeps photos map and normalizes new fields', () => {
@@ -355,10 +382,44 @@
   // ---------- storage ----------
   test('store: export -> import round-trips state', () => {
     const s = fresh(); const now = T(2026, 6, 1, 20);
-    fullDay(s, START, now); D.logR3(s, START, now);
+    fullDay(s, START, now); D.setWorkoutPlan(s, START, now, 'w2', 'x');
     const back = Store.importJson(Store.exportJson(s));
     eq(back.days[START].waterMl, D.WATER_GOAL_ML);
-    eq(back.r3Log, [START]); eq(back.run.startDate, START);
+    eq(back.days[START].read, true); eq(back.run.startDate, START);
+  });
+  test('store: a save from an older version gets settings added since (no crash, no undefined)', () => {
+    // exactly what the previous release stored: settings present, but no weekPlan / most reminders
+    const old = { v: 1, run: null, days: {}, settings: { cutoffHour: 4, gapHours: 3.5, bottleMl: 750, glassMl: 250,
+      reminders: { photo: '06:30' }, ruleNames: { r2: 'שם שלי', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' } } };
+    const s = Store.normalize(old);
+    eq(s.settings.weekPlan, [null, null, null, null, null, null, null]);
+    eq(s.settings.cutoffHour, 4); eq(s.settings.bottleMl, 750);          // user's values survive
+    eq(s.settings.reminders.photo, '06:30'); eq(s.settings.reminders.w1, '08:30');   // missing cues filled
+    eq(s.settings.ruleNames.r2, 'שם שלי');
+    // and it must not alias the defaults: mutating one result can't leak into the next
+    s.settings.weekPlan[1] = { w1: 'x' };
+    eq(Store.normalize(old).settings.weekPlan[1], null);
+  });
+  test('store: a very old save with no settings at all still loads with every default', () => {
+    const s = Store.normalize({ v: 1, run: null, days: {} });
+    eq(s.settings.reminders.endday, '22:30'); eq(s.settings.weekPlan.length, 7); eq(s.settings.ruleNames.r2, 'כלל אישי 2');
+  });
+  test('store migration: old pages/book/takeaway/r3Log/tasks become read:true, junk dropped', () => {
+    const old = { v: 1, run: null, r3Log: ['2026-06-01'], days: {
+      '2026-06-01': { tasks: { meal1: true, nosnack: true }, pages: 12, book: 'x', takeaway: 'y' },
+      '2026-06-02': { tasks: {}, pages: 9 },
+      '2026-06-03': { tasks: {}, read: true } } };
+    const s = Store.normalize(old);
+    eq(s.days['2026-06-01'].read, true); eq(s.days['2026-06-02'].read, false); eq(s.days['2026-06-03'].read, true);
+    eq(s.days['2026-06-01'].pages, undefined); eq(s.days['2026-06-01'].book, undefined);
+    eq(s.r3Log, undefined);
+  });
+  test('migration: a pending day that only failed on removed rules resolves itself', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 21);
+    fullDay(s, START, now);
+    s.pending = { dayKey: START, missing: ['nosnack', 'noalc'], auto: true };   // saved by the old version
+    const r = D.reevaluatePending(s, T(2026, 6, 2, 8));
+    eq(r.resolved, true); eq(s.pending, null);
   });
   test('store: import rejects files that are not 75hard backups', () => {
     let threw = false;
@@ -368,13 +429,42 @@
   test('store: normalize fills fields missing from an old save', () => {
     const old = { v: 1, days: { '2026-06-01': { tasks: { meal1: true } } }, run: null };
     const s = Store.normalize(old);
-    eq(s.days['2026-06-01'].w1.done, false); eq(s.settings.gapHours, 3); eq(Array.isArray(s.r3Log), true);
+    eq(s.days['2026-06-01'].w1.done, false); eq(s.settings.gapHours, 3); eq(s.r3Log, undefined);
+    eq(s.settings.weekPlan.length, 7); eq(s.days['2026-06-01'].read, false);
   });
-  test('store: corrupt save is preserved, not overwritten', () => {
-    localStorage.setItem(Store.KEY, '{not json');
-    const r = Store.load();
-    eq(r.error, 'corrupt'); eq(localStorage.getItem(Store.CORRUPT_KEY), '{not json');
-    localStorage.removeItem(Store.KEY); localStorage.removeItem(Store.CORRUPT_KEY);
+  // In-memory stand-in for localStorage: these tests must NEVER touch the real save
+  // (this page shares an origin with the app, and is deployed with it).
+  function fakeStorage() {
+    const m = new Map();
+    return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, _m: m };
+  }
+  test('store: corrupt save is preserved, not overwritten (in-memory storage only)', () => {
+    const fake = fakeStorage(); Store.useBackend(fake);
+    try {
+      fake.setItem(Store.KEY, '{not json');
+      const r = Store.load();
+      eq(r.error, 'corrupt'); eq(fake.getItem(Store.CORRUPT_KEY), '{not json');
+    } finally { Store.useBackend(null); }
+  });
+  test('store: save -> load round-trip through the backend', () => {
+    const fake = fakeStorage(); Store.useBackend(fake);
+    try {
+      const s = fresh(); fullDay(s, START, T(2026, 6, 1, 20));
+      eq(Store.save(s), true);
+      const r = Store.load();
+      eq(r.error, null); eq(r.state.days[START].read, true); eq(r.state.run.startDate, START);
+      eq(Store.load().state.settings.weekPlan.length, 7);
+    } finally { Store.useBackend(null); }
+  });
+  test('store: unavailable storage (throws) degrades to a fresh state, save reports failure', () => {
+    const boom = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('full'); }, removeItem() {} };
+    Store.useBackend(boom);
+    try {
+      eq(Store.load().error, 'unavailable'); eq(Store.save(D.newState()), false);
+    } finally { Store.useBackend(null); }
+  });
+  test('the tests leave the real localStorage untouched', () => {
+    eq(Object.keys(localStorage).filter((k) => k.startsWith('75hard:')).length, REAL_KEYS_BEFORE);
   });
 
   const sum = document.getElementById('sum');

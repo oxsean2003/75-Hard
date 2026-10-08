@@ -3,7 +3,7 @@
   'use strict';
 
   const ui = { sub: 'rules' };
-  const SUBS = [['rules', 'חוקים'], ['settings', 'הגדרות'], ['backup', 'גיבוי']];
+  const SUBS = [['rules', 'חוקים'], ['plan', 'תוכנית אימונים'], ['settings', 'הגדרות'], ['backup', 'גיבוי']];
 
   function rulesHtml(app) {
     const { esc } = app;
@@ -16,6 +16,7 @@
 
   function render(app) {
     const body = ui.sub === 'settings' ? Views.settings.settingsHtml(app)
+      : ui.sub === 'plan' ? Views.settings.planHtml(app)
       : ui.sub === 'backup' ? Views.settings.backupHtml(app) : rulesHtml(app);
     return `<h1 class="page-h">עוד</h1>
       <div class="pills">${SUBS.map(([id, t]) => `<button class="pill${ui.sub === id ? ' on' : ''}" data-act="moreSub" data-id="${id}">${t}</button>`).join('')}</div>

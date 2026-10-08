@@ -1,6 +1,6 @@
 // Offline cache. Same-origin files are network-first (fresh when online, cached when offline);
 // the SHELL list is precached for first offline use. Bump CACHE when the file list changes.
-const CACHE = '75hard-v4';
+const CACHE = '75hard-v5';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './js/app.js', './js/day.js', './js/store.js', './js/photos.js',

@@ -223,3 +223,21 @@ select, input[type=time] { width: 100%; background: var(--bg); color: var(--ink)
 .full { width: 100%; max-height: 62dvh; object-fit: contain; border-radius: 12px; background: #000; display: block; }
 .remlist { white-space: pre-wrap; direction: rtl; font: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 6px 0 12px; line-height: 1.8; }
 .sheet .center { text-align: center; }
+
+/* ---- round 2: iOS date/time inputs overflowed their box; swap dialog; rules card ---- */
+.field, .two > *, .rmgrid > * { min-width: 0; }
+input[type=date], input[type=time] {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
+  text-align: start; line-height: 1.2;
+}
+input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-and-time-value { text-align: start; min-height: 1.2em; margin: 0; }
+input[type=date]::-webkit-datetime-edit, input[type=time]::-webkit-datetime-edit { padding: 0; }
+.panel, .card { min-width: 0; }
+.opt-btn { display: block; width: 100%; text-align: start; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; font: inherit; cursor: pointer; min-height: 48px; }
+.opt-btn.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.rules-card b { display: block; margin: 10px 0 2px; }
+.wprow { border-top: 1px solid var(--line); padding: 10px 0; }
+.wprow:first-of-type { border-top: 0; }
+.wprow > b { display: block; margin-bottom: 4px; }
+.wprow select { font-size: 14px; min-height: 44px; }
