@@ -25,6 +25,8 @@ Hebrew RTL, phone-first PWA for the user's personal 75 Hard rule set. Vanilla HT
 - **`tests/tests.html` is deployed and shares an origin with the app.** Tests must never touch the real `localStorage`: storage tests use `Store.useBackend(fakeStorage)`; a test asserts the real `75hard:*` keys are unchanged. Never add a test that writes/removes real keys.
 - The browser pane is Chromium: it cannot reproduce iOS-Safari-only layout bugs (e.g. date inputs ignoring `width`). Apply the known CSS fix, check no overflow, and have the user confirm on the iPhone.
 
+- **Deploy lag:** GitHub Pages serves `Cache-Control: max-age=600`, so a plain `fetch()` in the service worker can hand the phone files up to 10 min stale. The SW therefore fetches same-origin with `{cache:'no-cache'}` (ETag revalidation) and registers with `updateViaCache:'none'`. **Every release: bump `CACHE` in `sw.js` AND `App.version` in `js/app.js`** (shown in עוד, with a "בדיקת עדכון עכשיו" button that clears the app-file cache and reloads — never the user's data).
+
 ## Conventions
 - Hebrew UI strings; mixed text gets `dir="auto"`. Color via CSS variables in `css/app.css`.
 - Verify UI changes in the browser pane (phone width) — `.claude/launch.json` serves on :8765. Test hooks: `App.offset` shifts the clock (ms).

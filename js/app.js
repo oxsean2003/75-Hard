@@ -13,6 +13,7 @@
   const App = {
     state: loaded.state,
     loadError: loaded.error,
+    version: '2026-10-08 · b',   // bump on every release (shown in עוד) together with CACHE in sw.js
     tab: 'today',
     fix: false,            // fixing the pending (failed) day before confirming a restart
     offset: 0,             // test hook: shifts the clock (ms)
@@ -144,6 +145,7 @@
   window.addEventListener('pageshow', App.refresh);
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // updateViaCache:'none' => the browser never serves sw.js itself from its HTTP cache.
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   }
 })();

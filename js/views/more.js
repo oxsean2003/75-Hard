@@ -20,10 +20,24 @@
       : ui.sub === 'backup' ? Views.settings.backupHtml(app) : rulesHtml(app);
     return `<h1 class="page-h">עוד</h1>
       <div class="pills">${SUBS.map(([id, t]) => `<button class="pill${ui.sub === id ? ' on' : ''}" data-act="moreSub" data-id="${id}">${t}</button>`).join('')}</div>
-      ${body}`;
+      ${body}
+      <p class="hint">גרסה ${app.esc(app.version)}</p>
+      <div class="btns"><button class="btn mini" data-act="checkUpdate">בדיקת עדכון עכשיו</button></div>`;
+  }
+
+  // Force the newest build: drop the saved copy of the app files (never your data) and reload.
+  async function checkUpdate(app) {
+    app.toast('בודק עדכון…');
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.update();
+      for (const k of await caches.keys()) await caches.delete(k);
+    } catch (e) { /* no service worker / blocked: a plain reload still helps */ }
+    location.reload();
   }
 
   function wire(app) {
+    app.act('checkUpdate', () => checkUpdate(app));
     app.act('moreSub', (el) => { ui.sub = el.dataset.id; app.render(); });
     app.act('goBackup', () => { ui.sub = 'backup'; app.go('more'); });
   }
