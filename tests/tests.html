@@ -379,6 +379,85 @@
     eq(typeof p.state.settings.reminders.photo, 'string');
   });
 
+  // ---------- sticky notes ----------
+  // close day #n (1-based) of a run starting START as a clean, successful day
+  function finishDay(s, n) {
+    const key = D.addDays(START, n - 1), [y, m, d] = key.split('-').map(Number), now = T(y, m, d, 22);
+    fullDay(s, key, now);
+    return D.endDay(s, now);
+  }
+  test('noteNumber counts down: day 1 -> 75, day 37 -> 39, day 75 -> 1', () => {
+    eq(D.noteNumber(1), 75); eq(D.noteNumber(37), 39); eq(D.noteNumber(75), 1);
+  });
+  test('pendingNote: none at first; appears after a day closes OK with the countdown number', () => {
+    const s = fresh();
+    eq(D.pendingNote(s), null);
+    finishDay(s, 1);
+    const note = D.pendingNote(s);
+    eq(note.n, 75); eq(note.dayNumber, 1); eq(note.ids, ['1:1']);
+  });
+  test('pendingNote: cleared once marked shown; next day gives the next number', () => {
+    const s = fresh();
+    finishDay(s, 1); D.markNotesShown(s, D.pendingNote(s).ids);
+    eq(D.pendingNote(s), null);
+    finishDay(s, 2);
+    eq(D.pendingNote(s).n, 74);
+  });
+  test('pendingNote: never for a failed day (confirmed restart) or a day waiting in pending', () => {
+    const s = fresh(); const now = T(2026, 6, 1, 22);
+    D.endDay(s, now, { confirmFail: true });                 // failed -> new attempt, no OK day
+    eq(D.pendingNote(s), null);
+    const s2 = fresh(); D.sync(s2, T(2026, 6, 2, 8));        // day 1 untouched -> pending
+    eq(D.pendingNote(s2), null);
+  });
+  test('pendingNote: catch-up shows only the NEWEST note and lists every unseen id', () => {
+    const s = fresh();
+    [1, 2, 3].forEach((n) => fullDay(s, D.addDays(START, n - 1), T(2026, 6, n, 21)));
+    D.sync(s, T(2026, 6, 4, 9));                              // app was shut: days 1-3 auto-close OK
+    const note = D.pendingNote(s);
+    eq(note.n, 73); eq(note.dayNumber, 3); eq(note.ids, ['1:1', '1:2', '1:3']);
+    D.markNotesShown(s, note.ids);
+    eq(D.pendingNote(s), null);
+  });
+  test('pendingNote: a day fixed from the pending state also earns a note', () => {
+    const s = fresh();
+    fullDay(s, START, T(2026, 6, 1, 21)); D.setTask(s, START, T(2026, 6, 1, 21), 'meal3', false);
+    D.sync(s, T(2026, 6, 2, 8));                              // pending (meal3 missing)
+    D.setTask(s, START, T(2026, 6, 2, 8), 'meal3', true);
+    D.reevaluatePending(s, T(2026, 6, 2, 8));
+    eq(D.pendingNote(s).n, 75);
+  });
+  test('notes are per attempt: a new attempt starts from 75 again and old days are not listed', () => {
+    const s = fresh();
+    finishDay(s, 1); D.markNotesShown(s, D.pendingNote(s).ids);
+    D.manualRestart(s, T(2026, 6, 2, 10));                    // new Day 1 = 2026-06-03
+    eq(D.completedNotes(s), []);
+    eq(D.pendingNote(s), null);
+    const key = '2026-06-03', now = T(2026, 6, 3, 22);
+    fullDay(s, key, now); D.endDay(s, now);
+    eq(D.pendingNote(s).n, 75); eq(D.pendingNote(s).ids, ['2:1']);
+  });
+  test('completedNotes lists only closed-OK days of the current run, oldest first', () => {
+    const s = fresh();
+    finishDay(s, 1); finishDay(s, 2);
+    D.ensureDay(s, '2026-06-03').closed = { at: 1, ok: false, auto: true, missing: ['water'] };
+    eq(D.completedNotes(s).map((x) => [x.dayNumber, x.n]), [[1, 75], [2, 74]]);
+  });
+  test('store migration: a save from before notes existed marks finished days as shown (no pop-up flood)', () => {
+    const s = fresh();
+    finishDay(s, 1); finishDay(s, 2);
+    const oldSave = JSON.parse(JSON.stringify(s)); delete oldSave.notesShown;       // what the previous release stored
+    const loaded = Store.normalize(oldSave);
+    eq(loaded.notesShown, ['1:1', '1:2']); eq(D.pendingNote(loaded), null);
+    finishDay(loaded, 3);                                                              // a genuinely new day still shows
+    eq(D.pendingNote(loaded).n, 73);
+  });
+  test('store: a save that already has notesShown keeps it as-is', () => {
+    const s = fresh(); finishDay(s, 1);
+    const loaded = Store.normalize(JSON.parse(JSON.stringify(s)));                     // notesShown: [] (day 1 not shown)
+    eq(loaded.notesShown, []); eq(D.pendingNote(loaded).n, 75);
+  });
+
   // ---------- storage ----------
   test('store: export -> import round-trips state', () => {
     const s = fresh(); const now = T(2026, 6, 1, 20);

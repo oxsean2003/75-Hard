@@ -87,6 +87,7 @@
         <div class="chip"><b>${s.best}</b><span>רצף שיא</span></div>
         <div class="chip"><b>${st.attempt || '—'}</b><span>ניסיון</span></div></div>
       ${milestonesHtml(app)}
+      ${Views.note.wallHtml(app)}
       <section class="group"><h2>תמונות</h2><div id="photoArea"><p class="note-l">טוען…</p></div></section>
       ${measureHtml(app, st)}${historyHtml(app, st)}`;
   }

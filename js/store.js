@@ -39,6 +39,8 @@
     out.settings.weekPlan = Array.isArray(saved.weekPlan) && saved.weekPlan.length === 7 ? saved.weekPlan : defaults.weekPlan;
     out.measurements = Array.isArray(s.measurements) ? s.measurements : [];
     out.celebrated = Array.isArray(s.celebrated) ? s.celebrated : [];
+    const hadNotes = Array.isArray(s.notesShown);
+    out.notesShown = hadNotes ? s.notesShown : [];
     delete out.r3Log;                                   // weekly rule was removed
     out.history = Array.isArray(s.history) ? s.history : [];
     Object.keys(out.days).forEach((k) => {
@@ -53,6 +55,8 @@
       });
       ['pages', 'book', 'takeaway'].forEach((f) => { delete out.days[k][f]; });
     });
+    // Saves from before sticky notes existed: don't pop up a note for every day already completed.
+    if (!hadNotes) out.notesShown = root.Day.completedNotes(out).map((d) => d.id);
     return out;
   }
 

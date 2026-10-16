@@ -13,7 +13,7 @@
   const App = {
     state: loaded.state,
     loadError: loaded.error,
-    version: '2026-10-08 · b',   // bump on every release (shown in עוד) together with CACHE in sw.js
+    version: '2026-10-16 · c',   // bump on every release (shown in עוד) together with CACHE in sw.js
     tab: 'today',
     fix: false,            // fixing the pending (failed) day before confirming a restart
     offset: 0,             // test hook: shifts the clock (ms)
@@ -59,7 +59,8 @@
   };
 
   App.modalKind = null;
-  App.modal = function (html, kind) {
+  App.modal = function (html, kind, cls) {
+    modalEl.className = 'modal' + (cls ? ' ' + cls : '');   // cls: e.g. 'note-bg' for the full-screen wall
     modalEl.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
     modalEl.hidden = false;
     document.body.classList.add('modal-open');
@@ -68,6 +69,7 @@
     if (f) f.focus();
   };
   App.closeModal = function () {
+    modalEl.className = 'modal';
     modalEl.hidden = true;
     modalEl.innerHTML = '';
     document.body.classList.remove('modal-open');
@@ -102,10 +104,14 @@
     } else if (App.modalKind === 'pending') {
       App.closeModal();
     }
-    // A milestone day just closed OK: celebrate it once.
+    // A day just closed OK: show its sticky note once (newest only); the milestone dialog follows.
     if (!App.modalKind && st.phase !== 'pending') {
-      const m = D.pendingMilestone(App.state);
-      if (m) Views.progress.openMilestone(App, m);
+      const note = D.pendingNote(App.state);
+      if (note) Views.note.openToday(App, note);
+      else {
+        const m = D.pendingMilestone(App.state);
+        if (m) Views.progress.openMilestone(App, m);
+      }
     }
     lastSig = signature(st);
   };

@@ -78,6 +78,11 @@
         <button class="btn" data-act="water" data-ml="-${st.bottleMl}" ${locked ? 'disabled' : ''}>−</button>
         <button class="btn primary" data-act="water" data-ml="${st.bottleMl}" ${locked ? 'disabled' : ''}>+ בקבוק (${st.bottleMl})</button>
         <button class="btn" data-act="water" data-ml="${st.glassMl}" ${locked ? 'disabled' : ''}>+ כוס</button>
+      </div>
+      <div class="water-custom">
+        <input type="number" id="waterCustom" inputmode="numeric" min="1" max="5000" step="1" placeholder="כמה שתיתם (מ״ל)"
+          aria-label="כמות מים במיליליטר" ${locked ? 'disabled' : ''}>
+        <button class="btn primary mini" data-act="waterCustom" ${locked ? 'disabled' : ''}>הוסף</button>
       </div></div>`;
   }
 
@@ -270,6 +275,13 @@
       done(D.setTask(s(), key(), now(), el.dataset.id, !cur));
     });
     app.act('water', (el) => done(D.addWater(s(), key(), now(), Number(el.dataset.ml))));
+    // any amount, in whole ml (1-5000); only the button adds, so nothing is added by accident
+    app.act('waterCustom', () => {
+      const raw = String(document.getElementById('waterCustom').value).trim();
+      const ml = /^\d+$/.test(raw) ? parseInt(raw, 10) : 0;
+      if (ml < 1 || ml > 5000) { app.toast('הזינו כמות במ״ל בין 1 ל-5000'); return; }
+      done(D.addWater(s(), key(), now(), ml));
+    });
 
     // reading: just a checkmark
     app.act('toggleRead', () => {

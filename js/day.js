@@ -52,6 +52,7 @@
       timer: null,          // running workout: { id, dayKey, startedAt, outdoor }
       measurements: [],     // [{ date, weight, waist }] weekly body measurements
       celebrated: [],       // milestone ids already shown, 'attempt:day'
+      notesShown: [],       // sticky-note ids already shown, 'attempt:dayNumber'
       lastBackupAt: null,
       completedAt: null
     };
@@ -285,6 +286,33 @@
   }
   function markCelebrated(state, id) { if (!state.celebrated.includes(id)) state.celebrated.push(id); }
 
+  // ---- sticky notes: one per successfully closed day, counting DOWN (day 1 -> 75 ... day 75 -> 1) ----
+  const noteNumber = (dayNo) => TOTAL_DAYS - dayNo + 1;
+
+  // Closed-OK days of the CURRENT run, oldest first (earlier attempts' days fall before the start date).
+  function completedNotes(state) {
+    if (!state.run) return [];
+    return Object.keys(state.days)
+      .filter((k) => diffDays(state.run.startDate, k) >= 0 && state.days[k].closed && state.days[k].closed.ok)
+      .sort()
+      .map((k) => {
+        const dayNo = dayNumber(state, k);
+        return { key: k, dayNumber: dayNo, n: noteNumber(dayNo), id: `${state.run.attempt}:${dayNo}` };
+      });
+  }
+
+  // The note to show now: the NEWEST completed day not yet shown. `ids` lists every unseen day up to it
+  // so a catch-up (days closed while the app was shut) shows one note, not a backlog of pop-ups.
+  function pendingNote(state) {
+    const unseen = completedNotes(state).filter((d) => !state.notesShown.includes(d.id));
+    if (!unseen.length) return null;
+    const latest = unseen[unseen.length - 1];
+    return { n: latest.n, dayNumber: latest.dayNumber, ids: unseen.map((d) => d.id) };
+  }
+  function markNotesShown(state, ids) {
+    ids.forEach((id) => { if (!state.notesShown.includes(id)) state.notesShown.push(id); });
+  }
+
   // ---- derived view data ----
   // Ring: 3 meals + 2 workouts + reading + photo + fractional water.
   function progress(state, key) {
@@ -320,6 +348,7 @@
     startRun, changeStartDate, canEdit, evaluateDay, sync, endDay,
     reevaluatePending, confirmReset, manualRestart, progress,
     addMeasurement, removeMeasurement, pendingMilestone, markCelebrated,
+    noteNumber, completedNotes, pendingNote, markNotesShown,
     setTask, setMeal, addWater, setPhoto, setRead, setWorkout, setWorkoutPlan
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

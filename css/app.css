@@ -241,3 +241,51 @@ input[type=date]::-webkit-datetime-edit, input[type=time]::-webkit-datetime-edit
 .wprow:first-of-type { border-top: 0; }
 .wprow > b { display: block; margin-bottom: 4px; }
 .wprow select { font-size: 14px; min-height: 44px; }
+
+/* ---- round 3: custom water amount + sticky notes ---- */
+.water-custom { display: flex; gap: 8px; margin-top: 10px; align-items: stretch; }
+.water-custom input { flex: 1; min-width: 0; }
+.water-custom .btn { flex: none; }
+
+.modal.note-bg {
+  align-items: center; justify-content: center; z-index: 55;
+  background:
+    radial-gradient(120% 90% at 30% 15%, #ded7c8 0%, #c4bba8 60%, #b0a692 100%),
+    #c4bba8;
+}
+.modal.note-bg::after {            /* faint plaster grain */
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: repeating-linear-gradient(0deg, #0000 0 3px, #00000009 3px 4px), repeating-linear-gradient(90deg, #0000 0 5px, #ffffff0d 5px 6px);
+}
+.note-bg .sheet { background: transparent; border: 0; border-radius: 0; max-width: 420px; max-height: 100dvh; padding: 24px 20px; position: relative; z-index: 1; overflow: visible; }
+.note-stage { text-align: center; }
+.note-bg .note-msg { color: #3b352a; font-size: 20px; font-weight: 800; margin: 6px 0 18px; }   /* beats .sheet p */
+.note-bg .btn { background: #fffdf5; color: #1a160c; border-color: #3b352a; }
+.note-bg .btn.primary { background: #2a2823; color: #fff3b0; border-color: #2a2823; }
+
+.note-svg { display: block; width: 100%; max-width: 350px; height: auto; margin: 0 auto; overflow: visible; }
+.note-svg .nnum { font-family: 'Permanent Marker', 'Marker Felt', 'Comic Sans MS', cursive; }
+.note-svg .ncap { font-family: 'Heebo', system-ui, sans-serif; font-weight: 800; }
+.note-svg .nbody { transform-box: fill-box; transform-origin: 50% 0%; transform: rotate(var(--r, -3deg)); }
+.note-anim .nbody { animation: notePull 1.2s cubic-bezier(.2, .8, .2, 1) both, noteSway 3.4s ease-in-out 1.2s infinite alternate; }
+.note-anim .nflap { transform-box: fill-box; transform-origin: 50% 50%; animation: flapFlutter 2.2s ease-in-out 1.2s infinite alternate; }
+@keyframes notePull {
+  0%   { transform: translateY(14px) scale(.94) rotate(0deg); }
+  40%  { transform: translateY(14px) scale(.94) rotate(0deg); }
+  100% { transform: translateY(0) scale(1) rotate(-4deg); }
+}
+@keyframes noteSway { from { transform: rotate(-4deg); } to { transform: rotate(-2deg) translateY(-3px); } }
+@keyframes flapFlutter { from { transform: rotate(0deg); } to { transform: rotate(4deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .note-anim .nbody, .note-anim .nflap { animation: none; }
+  .note-anim .nbody { transform: rotate(-3deg); }
+}
+
+.wall {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 4px; padding: 14px 8px;
+  border-radius: 14px; border: 1px solid var(--line);
+  background: radial-gradient(120% 90% at 30% 10%, #d8d0c0, #bdb39f);
+}
+.mini-note { background: none; border: 0; padding: 0; cursor: pointer; display: block; }
+.mini-note .note-svg { max-width: 100%; }
+.mini-note:focus-visible { outline: 2px solid #2a2823; outline-offset: 2px; border-radius: 8px; }
