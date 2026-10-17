@@ -39,6 +39,7 @@
     out.settings.weekPlan = Array.isArray(saved.weekPlan) && saved.weekPlan.length === 7 ? saved.weekPlan : defaults.weekPlan;
     out.measurements = Array.isArray(s.measurements) ? s.measurements : [];
     out.celebrated = Array.isArray(s.celebrated) ? s.celebrated : [];
+    out.pantryMissing = Array.isArray(s.pantryMissing) ? s.pantryMissing.filter((x) => typeof x === 'string') : [];
     const hadNotes = Array.isArray(s.notesShown);
     out.notesShown = hadNotes ? s.notesShown : [];
     delete out.r3Log;                                   // weekly rule was removed

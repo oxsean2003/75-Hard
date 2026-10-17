@@ -11,6 +11,8 @@
 <script src="../js/day.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/reminders.js"></script>
+<script src="../data/ingredients.he.js"></script>
+<script src="../js/plate.js"></script>
 <script src="../data/workouts.he.js"></script>
 <script src="../data/schedule.he.js"></script>
 <script>
@@ -456,6 +458,75 @@
     const s = fresh(); finishDay(s, 1);
     const loaded = Store.normalize(JSON.parse(JSON.stringify(s)));                     // notesShown: [] (day 1 not shown)
     eq(loaded.notesShown, []); eq(D.pendingNote(loaded).n, 75);
+  });
+
+  // ---------- plate builder ----------
+  const P = Plate, SLOTS = ['breakfast', 'lunch', 'dinner'];
+  test('catalog: unique ids, valid parts and slots, no empty names', () => {
+    const ids = P.ITEMS.map((i) => i.id);
+    eq(new Set(ids).size, ids.length, 'duplicate ids');
+    const parts = P.PARTS.map((p) => p.id);
+    P.ITEMS.forEach((i) => {
+      if (!parts.includes(i.part)) throw new Error('bad part ' + i.id);
+      if (!['b', 'm', 'bm'].includes(i.slots)) throw new Error('bad slots ' + i.id);
+      if (!i.name || !i.grp) throw new Error('missing name/grp ' + i.id);
+    });
+  });
+  test('catalog: every part has plenty of options in every meal (no empty rows)', () => {
+    SLOTS.forEach((slot) => P.PARTS.forEach((part) => {
+      const n = P.itemsFor(part.id, slot).length;
+      if (n < 5) throw new Error(`${slot}/${part.id} has only ${n} items`);
+    }));
+  });
+  test('every item always has substitutes in each meal it appears in (even with its family gone)', () => {
+    P.ITEMS.forEach((item) => SLOTS.filter((s) => P.inSlot(item, s)).forEach((slot) => {
+      const st = { pantryMissing: [] };
+      if (P.swaps(st, item.id, slot).length < 1) throw new Error(`no swap for ${item.id} in ${slot}`);
+      // knock out the item's whole family: there must still be something else
+      P.ITEMS.filter((i) => i.grp === item.grp).forEach((i) => P.toggleMissing(st, i.id));
+      if (P.swaps(st, item.id, slot).length < 1) throw new Error(`no swap outside family for ${item.id} in ${slot}`);
+    }));
+  });
+  test('swaps: same part and meal, available only, same family first, capped', () => {
+    const st = { pantryMissing: [] };
+    const s1 = P.swaps(st, 'avocado', 'lunch');
+    eq(s1.every((i) => i.part === 'fat' && P.inSlot(i, 'lunch')), true);
+    eq(s1[0].grp, 'oil');                                      // tahini / olive oil come before nuts
+    eq(s1.some((i) => i.id === 'avocado'), false);
+    P.toggleMissing(st, 'tahini');
+    eq(P.swaps(st, 'avocado', 'lunch').some((i) => i.id === 'tahini'), false);   // missing items are never suggested
+    eq(P.swaps(st, 'avocado', 'lunch', 3).length, 3);
+  });
+  test('swaps: a breakfast item never gets a lunch-only substitute and vice versa', () => {
+    P.swaps({ pantryMissing: [] }, 'yogurt', 'breakfast', 99).forEach((i) => eq(P.inSlot(i, 'breakfast'), true, i.id));
+    P.swaps({ pantryMissing: [] }, 'steak', 'dinner', 99).forEach((i) => eq(P.inSlot(i, 'dinner'), true, i.id));
+    eq(P.swaps({ pantryMissing: [] }, 'nope', 'lunch'), []);
+  });
+  test('pantry: everything available by default; toggle/clear; unknown ids ignored', () => {
+    const st = { pantryMissing: [] };
+    eq(P.isMissing(st, 'tuna'), false);
+    eq(P.toggleMissing(st, 'tuna'), true); eq(P.isMissing(st, 'tuna'), true);
+    P.toggleMissing(st, 'tuna'); eq(P.isMissing(st, 'tuna'), false);
+    eq(P.toggleMissing(st, 'not-a-real-id'), false); eq(st.pantryMissing, []);
+    P.toggleMissing(st, 'rice'); P.toggleMissing(st, 'tahini'); P.clearMissing(st); eq(st.pantryMissing, []);
+    eq(P.isMissing({}, 'tuna'), false);                         // tolerates a state without the field
+  });
+  test('compose: parts in plate order, items within a part joined by commas', () => {
+    eq(P.compose(['tahini', 'egg_fried', 'cucumber', 'sourdough', 'tomato', 'zaatar']),
+       'ביצי עין + לחם מחמצת + מלפפון, עגבנייה + טחינה + זעתר');
+    eq(P.compose([]), ''); eq(P.compose(['nope']), '');
+  });
+  test('completeness: needs protein + carb + (veg or fat); says what is missing', () => {
+    eq(P.completeness([]).missing, ['חלבון', 'פחמימה', 'ירקות']);
+    eq(P.completeness(['egg_fried']).missing, ['פחמימה', 'ירקות']);
+    eq(P.completeness(['egg_fried', 'sourdough']).missing, ['ירקות']);
+    eq(P.completeness(['egg_fried', 'sourdough', 'cucumber']).complete, true);
+    eq(P.completeness(['tuna', 'rice', 'olive_oil']).complete, true);          // a fat counts for the third part
+    eq(P.completeness(['tuna', 'rice', 'zaatar']).complete, false);           // flavor alone does not
+  });
+  test('store: a save without pantryMissing loads with [] and junk ids are dropped', () => {
+    eq(Store.normalize({ v: 1, run: null, days: {} }).pantryMissing, []);
+    eq(Store.normalize({ v: 1, run: null, days: {}, pantryMissing: ['rice', 5, null, 'tuna'] }).pantryMissing, ['rice', 'tuna']);
   });
 
   // ---------- storage ----------

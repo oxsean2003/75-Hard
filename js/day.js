@@ -53,6 +53,7 @@
       measurements: [],     // [{ date, weight, waist }] weekly body measurements
       celebrated: [],       // milestone ids already shown, 'attempt:day'
       notesShown: [],       // sticky-note ids already shown, 'attempt:dayNumber'
+      pantryMissing: [],    // plate builder: ids of ingredients NOT at home (default: everything is)
       lastBackupAt: null,
       completedAt: null
     };

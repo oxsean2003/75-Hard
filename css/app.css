@@ -289,3 +289,34 @@ input[type=date]::-webkit-datetime-edit, input[type=time]::-webkit-datetime-edit
 .mini-note { background: none; border: 0; padding: 0; cursor: pointer; display: block; }
 .mini-note .note-svg { max-width: 100%; }
 .mini-note:focus-visible { outline: 2px solid #2a2823; outline-offset: 2px; border-radius: 8px; }
+
+/* ---- round 4: plate builder ---- */
+.pantry-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+.pantry-bar .note-l { margin: 0; }
+.pp { margin: 0 0 14px; }
+.pp h3 { font-size: 14px; font-weight: 800; color: var(--muted); margin: 0 4px 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pc {
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 99px;
+  padding: 9px 14px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; min-height: 42px; text-align: start;
+}
+.pc.sel { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pc.miss { opacity: .5; text-decoration: line-through; border-style: dashed; }
+.pc.miss.sel { opacity: 1; text-decoration: none; }
+.plate-bar {
+  position: sticky; bottom: calc(var(--tab-h) + var(--safe-b) + 8px); z-index: 5;
+  background: var(--surface); border: 2px solid var(--ink); border-radius: 14px; padding: 12px 14px; margin: 8px 0 16px;
+  box-shadow: 0 6px 18px #0006;
+}
+.pb-text { font-weight: 800; font-size: 16px; line-height: 1.35; margin-bottom: 6px; }
+.pb-parts { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.pb-part.ok { color: var(--good); font-weight: 700; }
+.plate-bar .btns { margin-top: 0; justify-content: flex-start; }
+
+/* plate builder: collapsible parts + compact chips (dinner has 30+ proteins) */
+.pp-h { display: flex; width: 100%; justify-content: space-between; align-items: center; background: none; border: 0; border-bottom: 1px solid var(--line);
+  color: var(--ink); font: inherit; font-size: 15px; font-weight: 800; padding: 8px 4px; margin-bottom: 8px; cursor: pointer; min-height: 40px; }
+.pp-h small { color: var(--good); font-weight: 700; }
+.pp-chev { color: var(--muted); }
+.pc { padding: 7px 12px; font-size: 14px; min-height: 38px; }
+.chips { gap: 6px; }
