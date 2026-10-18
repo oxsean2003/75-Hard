@@ -115,10 +115,13 @@
   }
 
   // ===== workouts =====
+  // little coloured label for a quota category (null = a custom session outside the quota)
+  const catChip = (cat) => `<span class="catchip cat-${cat || 'other'}">${cat ? Training.BY.get(cat).short : 'אחר'}</span> `;
+
   function workoutHtml(app, id, key, day, locked) {
     const s = app.state, now = app.now(), w = day[id], other = day[id === 'w1' ? 'w2' : 'w1'];
-    const pl = Schedule.planFor(s, key, id), title = id === 'w1' ? 'אימון 1 · 45 דק׳' : 'אימון 2 · 45 דק׳';
-    const planned = pl.text;
+    const ef = Training.effective(s, key, id), title = id === 'w1' ? 'אימון 1 · 45 דק׳' : 'אימון 2 · 45 דק׳';
+    const planned = ef.text, chip = catChip(ef.cat);
     const timer = s.timer;
     const running = timer && timer.id === id && timer.dayKey === key;
 
@@ -126,12 +129,12 @@
       const bits = [typeof w.min === 'number' ? `${w.min} דק׳` : 'סומן ידנית', w.outdoor ? 'בחוץ' : 'בפנים'];
       if (w.startedAt) bits.push(`${fmtClock(w.startedAt)}–${fmtClock(w.endedAt)}`);
       return `<div class="task done wk"><span class="box">✓</span>
-        <span class="txt"><b>${title}</b><small>${app.esc(planned)}</small><small>${bits.join(' · ')}</small></span>
+        <span class="txt"><b>${title}</b><small>${chip}${app.esc(planned)}</small><small>${bits.join(' · ')}</small></span>
         ${locked ? '' : `<button class="btn mini" data-act="wkReset" data-id="${id}">ביטול</button>`}</div>`;
     }
     if (running) {
       const el = now - timer.startedAt, ready = el >= 45 * MIN;
-      return `<div class="task wk running"><span class="txt"><b>${title}</b><small>${app.esc(planned)} · ${timer.outdoor ? 'בחוץ' : 'בפנים'}</small>
+      return `<div class="task wk running"><span class="txt"><b>${title}</b><small>${chip}${app.esc(planned)} · ${timer.outdoor ? 'בחוץ' : 'בפנים'}</small>
         <span class="clock" data-timer="${id}">${mmss(el)}</span>
         <span class="bar"><i data-timer-bar style="width:${Math.min(el / (45 * MIN) * 100, 100)}%"></i></span></span>
         <span class="btns col">
@@ -146,8 +149,9 @@
       if (t > now) { until = t; block = `אפשר להתחיל בעוד <span data-until="${t}">${mmss(t - now)}</span> (מרווח ${s.settings.gapHours} שעות)`; }
     }
     const dis = locked || block;
-    return `<div class="task wk"><span class="txt"><b>${title}</b><small>${app.esc(planned)}</small>
-      ${id === 'w2' && pl.sports ? '<small class="note">אפשר להמשיך ל-90+ דק׳ — ספורט ארוך נחשב אימון 2</small>' : ''}
+    return `<div class="task wk"><span class="txt"><b>${title}</b><small>${chip}${app.esc(planned)}${ef.source === 'suggested' ? ' <span class="sg">הצעה</span>' : ''}</small>
+      ${ef.source === 'suggested' && ef.reason ? `<small class="note">${app.esc(ef.reason)}</small>` : ''}
+      ${ef.cat === 'sport' ? '<small class="note">אפשר להמשיך ל-90+ דק׳ — ספורט ארוך נחשב אימון 2</small>' : ''}
       ${block && !locked ? `<small class="note">${block}</small>` : ''}
       <span class="btns wkbtns">
         <button class="btn primary mini" data-act="wkStart" data-id="${id}" data-out="1" ${dis ? 'disabled' : ''}>התחל בחוץ</button>
@@ -186,6 +190,12 @@
         ? '<div class="banner"><b>הגיע זמן לגבות את הנתונים</b><span>הנתונים והתמונות נמצאים רק במכשיר הזה.</span><div class="btns"><button class="btn mini" data-act="goBackup">לגיבוי</button></div></div>'
         : '';
 
+    // weekly quota: one line + up to 2 soft hints (the full card lives in the Workouts tab)
+    const prog = Training.weekProgress(s, key);
+    const weekLine = `<div class="wk-week"><span>השבוע: <b>${prog.total.done}${prog.partial ? '' : '/' + Training.TOTAL}</b> אימונים${prog.partial ? ' (שבוע חלקי)' : ''}</span>
+      <button class="btn mini" data-act="gotoWorkouts">יעד שבועי</button></div>`;
+    const hintsHtml = locked || app.fix ? '' : Training.hints(s, key).slice(0, 2).map((h) => `<p class="hint-soft">${app.esc(h.text)}</p>`).join('');
+
     const meals = ['meal1', 'meal2', 'meal3'].map((id) => taskHtml(app, id, LABEL[id],
       (day.tasks[id] && day.meals && day.meals[id]) || MEAL_SUB[id], key, locked)).join('');
 
@@ -205,7 +215,7 @@
       </div>
       ${fixBanner}${closedBanner}${nudge}
       <section class="group"><h2>אוכל</h2>${meals}</section>
-      <section class="group"><h2>אימונים</h2>${workoutHtml(app, 'w1', key, day, locked)}${workoutHtml(app, 'w2', key, day, locked)}</section>
+      <section class="group"><h2>אימונים</h2>${weekLine}${workoutHtml(app, 'w1', key, day, locked)}${workoutHtml(app, 'w2', key, day, locked)}${hintsHtml}</section>
       <section class="group"><h2>מים, קריאה ותמונה</h2>${waterHtml(app, day, locked)}${readHtml(app, day, locked)}${photoHtml(app, day, key, locked)}</section>
       ${rulesCard(app)}
       ${app.fix || st.closedToday ? '' : '<button class="btn primary big" data-act="endDay">סיים את היום</button><p class="hint">לפני השינה. אם משהו חסר — תקבלו אזהרה לפני כל איפוס.</p>'}`;
@@ -269,6 +279,7 @@
     });
 
     app.act('gotoMeals', () => app.go('meals'));
+    app.act('gotoWorkouts', () => app.go('workouts'));
 
     app.act('toggleTask', (el) => {
       const cur = !!(s().days[key()] && s().days[key()].tasks[el.dataset.id]);
@@ -314,7 +325,8 @@
       const id = el.dataset.id, other = (D.ensureDay(st, k))[id === 'w1' ? 'w2' : 'w1'];
       if (other.done && other.endedAt && other.endedAt + st.settings.gapHours * 3600000 > now()) return;
       if (!D.canEdit(st, k, now())) return;
-      st.timer = { id, dayKey: k, startedAt: now(), outdoor: el.dataset.out === '1' };
+      const ef = Training.effective(st, k, id);                   // pin the category/session this workout counts as
+      st.timer = { id, dayKey: k, startedAt: now(), outdoor: el.dataset.out === '1', cat: ef.cat, plan: ef.text };
       done(true);
     });
     app.act('wkCancel', () => app.confirm({
@@ -325,7 +337,7 @@
       const t = s().timer; if (!t) return;
       const t1 = now(), min = Math.floor((t1 - t.startedAt) / MIN);
       if (min < 45) return;
-      const ok = D.setWorkout(s(), t.dayKey, t1, t.id, { done: true, outdoor: t.outdoor, startedAt: t.startedAt, endedAt: t1, min });
+      const ok = D.setWorkout(s(), t.dayKey, t1, t.id, Object.assign({ done: true, outdoor: t.outdoor, startedAt: t.startedAt, endedAt: t1, min, plan: t.plan }, t.cat ? { cat: t.cat } : {}));
       s().timer = null;
       if (!ok) app.toast('היום כבר נסגר — האימון לא נשמר', 4000);
       done(true);
@@ -333,9 +345,9 @@
     app.act('wkReset', (el) => done(D.setWorkout(s(), key(), now(), el.dataset.id,
       { done: false, outdoor: false, startedAt: null, endedAt: null, min: undefined })));
     app.act('wkManual', (el) => {
-      const id = el.dataset.id, pl = Schedule.planFor(s(), key(), id);
+      const id = el.dataset.id, ef = Training.effective(s(), key(), id);
       app.modal(`<h2>סימון ידני — אימון ${id === 'w1' ? '1' : '2'}</h2>
-        <p class="hint-l">${app.esc(pl.text)}</p>
+        <p class="hint-l">${catChip(ef.cat)}${app.esc(ef.text)}</p>
         <label class="field"><span>משך בדקות</span>
           <input type="number" id="mnMin" inputmode="numeric" min="1" max="300" value="45" autofocus></label>
         <label class="check"><input type="checkbox" id="mnOut" ${id === 'w1' ? 'checked' : ''}> האימון היה בחוץ (לגמרי)</label>
@@ -346,32 +358,42 @@
     app.act('mnSave', (el) => {
       const min = parseInt(document.getElementById('mnMin').value, 10) || 0;
       if (min < 1) { app.toast('הזינו משך בדקות'); return; }
-      const ok = D.setWorkout(s(), key(), now(), el.dataset.id, { done: true, outdoor: document.getElementById('mnOut').checked, min });
+      const ef = Training.effective(s(), key(), el.dataset.id);
+      const ok = D.setWorkout(s(), key(), now(), el.dataset.id, Object.assign({ done: true, outdoor: document.getElementById('mnOut').checked, min, plan: ef.text }, ef.cat ? { cat: ef.cat } : {}));
       app.closeModal(); done(ok);
     });
 
-    // swap today's session for another (or type your own)
-    app.act('wkSwap', (el) => {
-      const id = el.dataset.id, cur = Schedule.planFor(s(), key(), id);
-      const opts = Schedule.options();
-      app.modal(`<h2>החלפת אימון ${id === 'w1' ? '1' : '2'}</h2>
-        <p class="hint-l">עכשיו: ${app.esc(cur.text)}</p>
-        <div class="opts">${opts.map((o, i) => `<button class="opt-btn${o.text === cur.text ? ' on' : ''}" data-act="wkSwapPick" data-id="${id}" data-i="${i}">${app.esc(o.text)}</button>`).join('')}</div>
-        <label class="field"><span>או כתבו אימון משלכם</span>
-          <input type="text" id="wkCustom" maxlength="120" placeholder="למשל: שחייה, אופניים..."></label>
-        <div class="btns col">
-          <button class="btn primary" data-act="wkSwapCustom" data-id="${id}">שמירת אימון משלי</button>
-          ${cur.source === 'day' ? `<button class="btn" data-act="wkSwapClear" data-id="${id}">חזרה לתוכנית הרגילה של היום</button>` : ''}
+    // choose what a slot is today: step 1 = quota category, step 2 = a session of it (or your own text)
+    const slotName = (id) => (id === 'w1' ? 'אימון 1' : 'אימון 2');
+    const openCats = (id) => {
+      const ef = Training.effective(s(), key(), id), prog = Training.weekProgress(s(), key());
+      const sug = Training.suggest(s(), key(), id, 2).map((x) => x.cat);
+      const rec = (s().days[key()] || {})[id] || {};
+      app.modal(`<h2>${slotName(id)}: מה עושים?</h2>
+        <p class="hint-l">${prog.partial ? 'שבוע חלקי — המספרים הם מה שכבר בוצע.' : 'בסוגריים: כמה בוצעו מתוך המכסה השבועית.'}</p>
+        <div class="opts">${prog.cats.map((c) => `<button class="opt-btn${c.id === ef.cat ? ' on' : ''}" data-act="wkCat" data-id="${id}" data-cat="${c.id}">
+          <b>${app.esc(c.name)}</b> <span class="meta">(${c.done}${prog.partial ? '' : '/' + c.target})</span>${sug.includes(c.id) ? ' <span class="sg">הצעה</span>' : ''}</button>`).join('')}</div>
+        <div class="btns col">${rec.cat || rec.plan ? `<button class="btn" data-act="wkClear" data-id="${id}">חזרה להצעה</button>` : ''}
           <button class="btn" data-act="closeModal">ביטול</button></div>`);
+    };
+    app.act('wkSwap', (el) => openCats(el.dataset.id));
+    app.act('wkCat', (el) => {
+      const id = el.dataset.id, cat = el.dataset.cat, ef = Training.effective(s(), key(), id);
+      app.modal(`<h2>${app.esc(Training.BY.get(cat).name)}</h2>
+        <div class="opts">${Training.sessionsFor(cat).map((t, i) => `<button class="opt-btn${t === ef.text ? ' on' : ''}" data-act="wkPick" data-id="${id}" data-cat="${cat}" data-i="${i}">${app.esc(t)}</button>`).join('')}</div>
+        <label class="field"><span>או כתבו אימון משלכם (נספר ב${app.esc(Training.BY.get(cat).short)})</span>
+          <input type="text" id="wkCustom" maxlength="120" placeholder="למשל: שחייה, אופניים..."></label>
+        <div class="btns col"><button class="btn primary" data-act="wkCustomSave" data-id="${id}" data-cat="${cat}">שמירת אימון משלי</button>
+          <button class="btn" data-act="wkSwap" data-id="${id}">חזרה לקטגוריות</button></div>`);
     });
-    const swapTo = (id, text) => { app.closeModal(); done(D.setWorkoutPlan(s(), key(), now(), id, text)); };
-    app.act('wkSwapPick', (el) => swapTo(el.dataset.id, Schedule.options()[Number(el.dataset.i)].text));
-    app.act('wkSwapCustom', (el) => {
+    const choose = (id, cat, plan) => { app.closeModal(); done(D.setWorkoutChoice(s(), key(), now(), id, { cat, plan })); };
+    app.act('wkPick', (el) => choose(el.dataset.id, el.dataset.cat, Training.sessionsFor(el.dataset.cat)[Number(el.dataset.i)]));
+    app.act('wkCustomSave', (el) => {
       const t = document.getElementById('wkCustom').value.trim();
       if (!t) { app.toast('כתבו שם לאימון'); return; }
-      swapTo(el.dataset.id, t);
+      choose(el.dataset.id, el.dataset.cat, t);
     });
-    app.act('wkSwapClear', (el) => swapTo(el.dataset.id, ''));
+    app.act('wkClear', (el) => choose(el.dataset.id, '', ''));
 
     // end of day + failed-day flows
     app.act('endDay', () => {

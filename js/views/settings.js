@@ -79,25 +79,6 @@
         <button class="btn danger" data-act="resetAll">מחיקת הכול</button></div>`;
   }
 
-  // Weekly plan: which session each weekday defaults to (changes apply immediately).
-  function planHtml(app) {
-    const { esc } = app, opts = Schedule.options();
-    const select = (wd, id) => {
-      const cur = Schedule.weekdayPlan(app.state, wd, id);
-      const inList = opts.some((o) => o.text === cur);
-      return `<label class="field"><span>${id === 'w1' ? 'אימון 1' : 'אימון 2'}</span>
-        <select data-change="wpChange" data-wd="${wd}" data-id="${id}">
-          ${opts.map((o) => `<option value="${esc(o.text)}"${o.text === cur ? ' selected' : ''}>${esc(o.text)}</option>`).join('')}
-          ${inList ? '' : `<option value="${esc(cur)}" selected>${esc(cur)}</option>`}
-          <option value="__other__">אחר…</option></select></label>`;
-    };
-    return `<div class="card"><h2 class="sub-h">תוכנית שבועית</h2>
-      <p class="note-l">בחרו מה האימון הרגיל בכל יום בשבוע. בנוסף אפשר להחליף אימון ביום מסוים במסך "היום".</p>
-      ${Schedule.DAYS.map((d, wd) => `<div class="wprow"><b>${esc(d.name)}</b>${select(wd, 'w1')}${select(wd, 'w2')}</div>`).join('')}
-      <button class="btn" data-act="wpReset">איפוס לתוכנית ברירת המחדל</button></div>`;
-  }
-  const esc0 = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
   function wire(app) {
     app.act('saveSettings', () => {
       const v = (id) => document.getElementById(id).value;
@@ -157,33 +138,6 @@
       }).catch(() => app.toast('אי אפשר לקרוא את הקובץ', 4000));
     });
 
-    // weekly plan (stored per weekday; text equal to the calendar default is stored as "no override")
-    const setWeekPlan = (wd, id, text) => {
-      const wp = app.state.settings.weekPlan;
-      const rec = Object.assign({}, wp[wd] || {});
-      if (!text || text === Schedule.DAYS[wd][id]) delete rec[id]; else rec[id] = text.slice(0, 120);
-      wp[wd] = Object.keys(rec).length ? rec : null;
-      app.commit(); app.render();
-    };
-    app.act('wpChange', (el) => {
-      const wd = Number(el.dataset.wd), id = el.dataset.id;
-      if (el.value !== '__other__') { setWeekPlan(wd, id, el.value); return; }
-      app.render();   // put the select back until a name is saved
-      app.modal(`<h2>אימון משלכם — ${app.esc(Schedule.DAYS[wd].name)}, ${id === 'w1' ? 'אימון 1' : 'אימון 2'}</h2>
-        <label class="field"><span>שם האימון</span><input type="text" id="wpCustom" maxlength="120" placeholder="למשל: שחייה" autofocus></label>
-        <div class="btns"><button class="btn" data-act="closeModal">ביטול</button>
-        <button class="btn primary" data-act="wpCustomSave" data-wd="${wd}" data-id="${id}">שמירה</button></div>`);
-    });
-    app.act('wpCustomSave', (el) => {
-      const t = document.getElementById('wpCustom').value.trim();
-      if (!t) { app.toast('כתבו שם לאימון'); return; }
-      app.closeModal(); setWeekPlan(Number(el.dataset.wd), el.dataset.id, t);
-    });
-    app.act('wpReset', () => app.confirm({
-      title: 'לאפס את התוכנית השבועית?', body: 'כל הימים יחזרו לתוכנית ברירת המחדל.', ok: 'איפוס',
-      onOk: () => { app.state.settings.weekPlan = [null, null, null, null, null, null, null]; app.commit(); app.render(); app.toast('התוכנית אופסה'); }
-    }));
-
     app.act('manualRestart', () => app.confirm({
       title: 'להתחיל מחדש מיום 1?', body: 'האתגר הנוכחי יסתיים וההיסטוריה תישמר. יום 1 החדש יהיה מחר.', ok: 'המשך', danger: true,
       onOk: () => app.confirm({
@@ -213,5 +167,5 @@
   }
 
   root.Views = root.Views || {};
-  root.Views.settings = { settingsHtml, planHtml, backupHtml, wire };
+  root.Views.settings = { settingsHtml, backupHtml, wire };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

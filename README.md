@@ -7,7 +7,8 @@ A Hebrew, right-to-left web app for the 75 Hard challenge. Installs on an iPhone
 - Finish a day and a **sticky note is pulled off the wall** with a countdown number (75 after day 1 … 1 after day 75). All your notes stay on a wall in the Progress tab.
 - Water: tap bottle/glass, or type any amount in ml.
 - **Plate builder** (Meals tab): build a meal from parts — protein / whole carb / veg / fat / flavor — from ~90 rule-friendly ingredients per meal; mark what's missing at home ("אין לי משהו בבית") and get substitutes; log exactly what you ate. The original ready-made dishes stay under "הצעות מוכנות", plus an eating-out / cafeteria guide ("בחוץ").
-- Workouts are interchangeable: swap a session for the day on Today ("החלף אימון", or type your own), and set your default session for each weekday under **עוד ← תוכנית אימונים**.
+- **Weekly training quota** (Workouts tab): 14 sessions per calendar week (Sun–Sat) = strength 4 (upper 2, legs/full 2), impact 3 (2 games, 1 run), recovery walks 5, mobility 2. Each workout carries a category; the card shows progress, today's two slots (the app suggests what fits what's left), a week strip and soft hints (outdoor workout planned? legs on a run day? mobility after a game?). It's a goal, never a reset.
+- Workouts are interchangeable: pick or swap a workout's category and session on Today ("החלף אימון", or type your own).
 - You choose the start date. Press **"סיים את היום"** when you go to sleep; if you forget, the day closes automatically at 05:00 (configurable).
 - A missed item never resets silently: you get a warning, can fix a mis-tap, and only a confirmation restarts from Day 1. Best streak and every failed attempt are kept.
 - Workout timers, meal guide (logs meals to the checklist), 7-day training calendar, 45-minute routines, exercise library, rules page.
@@ -54,6 +55,6 @@ js/photos.js     IndexedDB photos + downscaling
 js/reminders.js  time cues
 js/app.js        shell: clock sync, router, modals, click delegation
 js/views/        today · meals · workouts · progress · settings · more
-data/            Hebrew content: meals, workouts, schedule, rules
+data/            Hebrew content: meals, ingredients, workouts, training quota, rules
 tests/tests.html in-browser test runner
 ```

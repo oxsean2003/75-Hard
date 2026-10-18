@@ -41,8 +41,7 @@
         glassMl: 250,
         // time cues for in-app banners and the iOS Reminders list (HH:MM, editable)
         reminders: { photo: '07:00', w1: '08:30', lunch: '13:00', w2: '17:00', dinner: '19:30', read: '21:00', phonePm: '22:00', endday: '22:30' },
-        ruleNames: { r2: 'כלל אישי 2', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' },  // reminder text only
-        weekPlan: [null, null, null, null, null, null, null]  // per weekday (0=Sun): { w1, w2 } text, null = calendar default
+        ruleNames: { r2: 'כלל אישי 2', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' }   // reminder text only
       },
       run: null,            // { attempt, startDate, startedAtMs }
       days: {},             // dayKey -> day record
@@ -66,7 +65,7 @@
       waterMl: 0,
       read: false,          // 10 pages of a physical non-fiction book: just a checkmark
       photo: false,
-      w1: { done: false, outdoor: false },   // + optional plan (text override), min, startedAt, endedAt
+      w1: { done: false, outdoor: false },   // + optional cat (quota category) + plan (session text), min, startedAt, endedAt
       w2: { done: false, outdoor: false },
       closed: null          // { at, ok, auto, missing[] }
     };
@@ -254,10 +253,15 @@
   const setRead = (s, key, now, val) => edit(s, key, now, (d) => { d.read = !!val; });
   const setWorkout = (s, key, now, id, patch) => (id === 'w1' || id === 'w2')
     && edit(s, key, now, (d) => { Object.assign(d[id], patch); });
-  // Swap which session you do today (text; '' = back to the plan). Not once it's done.
-  const setWorkoutPlan = (s, key, now, id, text) => (id === 'w1' || id === 'w2')
+  // Choose what a slot is today: { cat: quota category id, plan: session text }. Both '' = back to the
+  // suggestion. Not once it's done (a finished workout keeps what it was).
+  const setWorkoutChoice = (s, key, now, id, choice) => (id === 'w1' || id === 'w2')
     && !(s.days[key] && s.days[key][id].done)
-    && edit(s, key, now, (d) => { d[id].plan = String(text || '').trim().slice(0, 120); });
+    && edit(s, key, now, (d) => {
+      const cat = String((choice && choice.cat) || ''), plan = String((choice && choice.plan) || '').trim().slice(0, 120);
+      if (/^[a-z_]{1,12}$/.test(cat)) d[id].cat = cat; else delete d[id].cat;
+      if (plan) d[id].plan = plan; else delete d[id].plan;
+    });
 
   // ---- measurements (not tied to the day lifecycle: can be added/edited any time) ----
   function addMeasurement(state, dateKey, weight, waist) {
@@ -350,7 +354,7 @@
     reevaluatePending, confirmReset, manualRestart, progress,
     addMeasurement, removeMeasurement, pendingMilestone, markCelebrated,
     noteNumber, completedNotes, pendingNote, markNotesShown,
-    setTask, setMeal, addWater, setPhoto, setRead, setWorkout, setWorkoutPlan
+    setTask, setMeal, addWater, setPhoto, setRead, setWorkout, setWorkoutChoice
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Day = api;

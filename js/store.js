@@ -26,6 +26,22 @@
     }
   }
 
+  // Earlier releases showed a weekday template / default calendar instead of an explicit category. Pin what a
+  // DONE workout was onto its record so it keeps counting toward the weekly quota after the template is gone.
+  function materializeLegacyWorkouts(day, key, legacyPlan) {
+    const T = root.Training, TD = root.TrainingData;
+    if (!T || !TD) return;
+    const [y, m, d] = key.split('-').map(Number), wd = new Date(y, m - 1, d).getDay();
+    ['w1', 'w2'].forEach((id) => {
+      const w = day[id];
+      if (!w.done || w.cat) return;
+      const wp = legacyPlan[wd];
+      const text = w.plan || (wp && wp[id]) || (TD.LEGACY_DEFAULTS[wd] || {})[id];
+      const cat = T.catOfText(text);
+      if (cat) { w.cat = cat; if (!w.plan && text) w.plan = text; }
+    });
+  }
+
   // Fill any fields missing from older saves so the rest of the app can rely on shape.
   function normalize(s) {
     if (!s || typeof s !== 'object' || s.v !== 1 || typeof s.days !== 'object') throw new Error('bad state');
@@ -36,7 +52,8 @@
     out.settings = Object.assign({}, defaults, saved);
     out.settings.ruleNames = Object.assign({}, defaults.ruleNames, saved.ruleNames);
     out.settings.reminders = Object.assign({}, defaults.reminders, saved.reminders);
-    out.settings.weekPlan = Array.isArray(saved.weekPlan) && saved.weekPlan.length === 7 ? saved.weekPlan : defaults.weekPlan;
+    const legacyPlan = Array.isArray(saved.weekPlan) ? saved.weekPlan : [];     // per-weekday template of earlier releases
+    delete out.settings.weekPlan;
     out.measurements = Array.isArray(s.measurements) ? s.measurements : [];
     out.celebrated = Array.isArray(s.celebrated) ? s.celebrated : [];
     out.pantryMissing = Array.isArray(s.pantryMissing) ? s.pantryMissing.filter((x) => typeof x === 'string') : [];
@@ -55,6 +72,7 @@
         w2: Object.assign({ done: false, outdoor: false }, d.w2)
       });
       ['pages', 'book', 'takeaway'].forEach((f) => { delete out.days[k][f]; });
+      materializeLegacyWorkouts(out.days[k], k, legacyPlan);
     });
     // Saves from before sticky notes existed: don't pop up a note for every day already completed.
     if (!hadNotes) out.notesShown = root.Day.completedNotes(out).map((d) => d.id);

@@ -14,7 +14,8 @@
 <script src="../data/ingredients.he.js"></script>
 <script src="../js/plate.js"></script>
 <script src="../data/workouts.he.js"></script>
-<script src="../data/schedule.he.js"></script>
+<script src="../data/training.he.js"></script>
+<script src="../js/training.js"></script>
 <script>
 (function () {
   const D = Day;
@@ -286,32 +287,218 @@
     eq(D.manualRestart(s, T(2026, 6, 2, 8)).error, 'pending');
   });
 
-  // ---------- interchangeable workouts ----------
-  test('planFor precedence: day override > weekly plan > calendar default', () => {
-    const s = fresh(); const now = T(2026, 6, 1, 9);                 // 2026-06-01 is a Monday
-    const dflt = Schedule.planFor(s, START, 'w2');
-    eq(dflt.source, 'default'); eq(dflt.text, Schedule.DAYS[1].w2);
-    s.settings.weekPlan[1] = { w2: 'שחייה' };
-    eq(Schedule.planFor(s, START, 'w2'), { text: 'שחייה', sports: false, source: 'week' });
-    eq(Schedule.planFor(s, START, 'w1').source, 'default');          // only w2 was overridden
-    eq(D.setWorkoutPlan(s, START, now, 'w2', 'כדורסל עם חברים'), true);
-    eq(Schedule.planFor(s, START, 'w2'), { text: 'כדורסל עם חברים', sports: true, source: 'day' });
-    D.setWorkoutPlan(s, START, now, 'w2', '');                        // clear -> back to the weekly plan
-    eq(Schedule.planFor(s, START, 'w2').source, 'week');
+  // ---------- weekly training quota ----------
+  const SUN = '2026-06-07';                       // a Sunday: a run starting here has full calendar weeks
+  const Tr = Training;
+  function doWorkout(st, key, id, cat, extra) {   // finish a workout on its own day (so the guards pass)
+    const [y, m, d] = key.split('-').map(Number), now = T(y, m, d, 12);
+    return D.setWorkout(st, key, now, id, Object.assign({ done: true, outdoor: false, min: 45, cat }, extra));
+  }
+  function choose(st, key, id, cat) {
+    const [y, m, d] = key.split('-').map(Number);
+    return D.setWorkoutChoice(st, key, T(y, m, d, 9), id, { cat, plan: '' });
+  }
+  const day = (n) => D.addDays(SUN, n);           // n = 0 Sunday ... 6 Saturday of week 1
+  // the user's sample week (day -> [slot 1, slot 2])
+  const SAMPLE = [['str_up', 'walk'], ['sport', 'walk'], ['mob', 'walk'], ['str_low', 'walk'], ['run', 'str_up'], ['sport', 'walk'], ['mob', 'str_low']];
+
+  test('quota: 6 categories whose weekly targets add up to 14 (7 days x 2)', () => {
+    eq(Tr.TOTAL, 14);
+    eq(Tr.CATS.map((c) => [c.id, c.target]), [['str_up', 2], ['str_low', 2], ['sport', 2], ['run', 1], ['walk', 5], ['mob', 2]]);
   });
-  test('setWorkoutPlan: refused once the workout is done, on other days and for bad ids', () => {
-    const s = fresh(); const now = T(2026, 6, 1, 9);
-    D.setWorkout(s, START, now, 'w1', { done: true });
-    eq(D.setWorkoutPlan(s, START, now, 'w1', 'x'), false);
-    eq(D.setWorkoutPlan(s, '2026-06-02', now, 'w2', 'x'), false);
-    eq(D.setWorkoutPlan(s, START, now, 'water', 'x'), false);
+  test('weekOf: Sunday-Saturday, across month / year / DST boundaries', () => {
+    eq(Tr.weekOf('2026-10-18'), { start: '2026-10-18', end: '2026-10-24' });   // a Sunday
+    eq(Tr.weekOf('2026-10-24'), { start: '2026-10-18', end: '2026-10-24' });   // a Saturday
+    eq(Tr.weekOf('2026-10-21'), { start: '2026-10-18', end: '2026-10-24' });
+    eq(Tr.weekOf('2026-12-31'), { start: '2026-12-27', end: '2027-01-02' });   // year boundary
+    eq(Tr.weekOf('2026-03-27'), { start: '2026-03-22', end: '2026-03-28' });   // Israel DST starts this Friday
+    eq(Tr.weekOf('2026-10-25'), { start: '2026-10-25', end: '2026-10-31' });   // DST ends this Sunday
   });
-  test('Schedule.options: distinct sessions + routines, sports flagged', () => {
-    const o = Schedule.options();
-    eq(new Set(o.map((x) => x.text)).size, o.length);
-    eq(o.some((x) => x.text.startsWith('אפשרות א׳')), true);
-    eq(o.filter((x) => x.sports).length >= 1, true);
+  test('catOfText: every earlier calendar text, routines, and keyword fallbacks', () => {
+    Object.keys(TrainingData.LEGACY_CATS).forEach((t) => eq(Tr.catOfText(t), TrainingData.LEGACY_CATS[t], t));
+    Workouts.ROUTINES.forEach((r) => eq(Tr.catOfText(r.name), { A: 'str_low', B: 'run', C: 'mob' }[r.id], r.name));
+    Tr.CATS.forEach((c) => TrainingData.SESSIONS[c.id].forEach((t) => eq(Tr.catOfText(t), c.id, t)));   // every offered session maps back to its own category
+    eq(Tr.catOfText('כדורסל עם חברים'), 'sport'); eq(Tr.catOfText('ריצה בפארק'), 'run'); eq(Tr.catOfText('יוגה'), 'mob');
+    eq(Tr.catOfText('הליכה בחוף'), 'walk'); eq(Tr.catOfText('שחייה'), null); eq(Tr.catOfText(''), null); eq(Tr.catOfText(null), null);
   });
+  test('catOf: explicit category wins; an invalid one falls back to the text', () => {
+    eq(Tr.catOf({ cat: 'mob', plan: 'כדורסל' }), 'mob');
+    eq(Tr.catOf({ cat: 'nope', plan: 'כדורסל' }), 'sport');
+    eq(Tr.catOf({}), null); eq(Tr.catOf(null), null);
+  });
+  test('every category offers sessions (routines included) and a default', () => {
+    Tr.CATS.forEach((c) => { if (Tr.sessionsFor(c.id).length < 2) throw new Error('few sessions ' + c.id); eq(Tr.defaultSession(c.id), Tr.sessionsFor(c.id)[0]); });
+    eq(Tr.sessionsFor('mob').some((t) => t.startsWith('אפשרות ג')), true);
+  });
+
+  test('weekProgress: counts only DONE workouts of the current run, capped per category in the total', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'walk'); doWorkout(st, day(0), 'w2', 'str_up'); doWorkout(st, day(1), 'w1', 'str_up');
+    choose(st, day(1), 'w2', 'sport');                           // chosen, not done: must not count
+    const pr = Tr.weekProgress(st, day(1));
+    eq(pr.cats.map((c) => c.done), [2, 0, 0, 0, 1, 0]);
+    eq(pr.total, { done: 3, target: 14 }); eq(pr.partial, false); eq(pr.other, 0); eq(pr.extra, 0);
+  });
+  test('weekProgress: extra sessions beyond a target and uncategorised ones are shown but not counted', () => {
+    const st = fresh(SUN);
+    for (let i = 0; i < 3; i++) { doWorkout(st, day(i), 'w1', 'run'); }       // 3 runs, target 1
+    doWorkout(st, day(0), 'w2', 'zzz');                                       // unknown category
+    const pr = Tr.weekProgress(st, day(2));
+    eq(pr.cats.find((c) => c.id === 'run').done, 3);
+    eq(pr.total.done, 1); eq(pr.other, 1); eq(pr.extra, 3);                    // 2 extra runs + 1 other
+  });
+  test('weekProgress: first and last weeks of the run are partial (no strict target)', () => {
+    const st = fresh();                                                       // starts Monday 2026-06-01 -> week began Sunday
+    const first = Tr.weekProgress(st, START);
+    eq(first.partial, true); eq(first.total.target, null); eq(first.status, null);
+    const st2 = fresh(SUN), lastDay = D.addDays(SUN, 74);                     // day 75 = Thursday 2026-08-20
+    eq(Tr.weekProgress(st2, lastDay).partial, true);
+    eq(Tr.weekProgress(st2, day(8)).partial, false);                          // a middle week is full
+  });
+  test('weekProgress: days of an earlier attempt are not counted after a restart', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'walk');
+    D.manualRestart(st, T(2026, 6, 8, 10));                                   // new Day 1 = Tuesday 06-09
+    const pr = Tr.weekProgress(st, day(3));
+    eq(pr.total.done, 0); eq(pr.partial, true);
+  });
+  test('weekProgress status: on track at the pace of the quota, behind when a slot is wasted, done at 14', () => {
+    const st = fresh(SUN);
+    eq(Tr.weekProgress(st, day(0)).status, 'ontrack');                        // nothing done yet, 14 slots, 14 owed
+    eq(Tr.weekProgress(st, day(1)).status, 'behind');                         // a whole day passed with nothing done
+    doWorkout(st, day(0), 'w1', 'str_up'); doWorkout(st, day(0), 'w2', 'walk');
+    const next = Tr.weekProgress(st, day(1));
+    eq(next.status, 'ontrack'); eq(next.need, 12); eq(next.slotsLeft, 12); eq(next.daysLeft, 6);
+  });
+  test('weekProgress: slotsLeft accounts for today being closed', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'str_up'); doWorkout(st, day(0), 'w2', 'walk');
+    const before = Tr.weekProgress(st, day(0));
+    eq(before.slotsLeft, 12); eq(before.need, 12);                            // 6 days x 2 + today's 2 done
+    D.ensureDay(st, day(0)).closed = { at: 1, ok: true, auto: false, missing: [] };
+    const after = Tr.weekProgress(st, day(0));
+    eq(after.daysLeft, 6); eq(after.slotsLeft, 12);
+  });
+  test('the sample week (4 strength, 2 games, 1 run, 5 walks, 2 mobility) fills the quota exactly: 14/14', () => {
+    const st = fresh(SUN);
+    SAMPLE.forEach(([a, b], i) => { doWorkout(st, day(i), 'w1', a); doWorkout(st, day(i), 'w2', b); });
+    const pr = Tr.weekProgress(st, day(6));
+    eq(pr.cats.map((c) => c.done), [2, 2, 2, 1, 5, 2]);
+    eq(pr.total, { done: 14, target: 14 }); eq(pr.need, 0); eq(pr.status, 'done'); eq(pr.extra, 0);
+  });
+
+  test('suggest: day 1 pairs a strength session with an easy outdoor one', () => {
+    const st = fresh(SUN);
+    const w1 = Tr.suggest(st, day(0), 'w1'), w2 = Tr.suggest(st, day(0), 'w2');
+    eq(w1[0].cat, 'str_up');
+    eq(w2[0].cat, 'walk'); eq(w2[0].reason, 'אימון בחוץ להיום');
+  });
+  test('suggest: mobility is first the day after a game', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w2', 'sport');
+    const s1 = Tr.suggest(st, day(1), 'w1');
+    eq(s1[0].cat, 'mob'); eq(s1[0].reason, 'יום אחרי משחק');
+    eq(Tr.suggest(st, day(1), 'w1', 6).findIndex((x) => x.cat === 'sport') > 0, true);   // and not a second game right away
+  });
+  test('suggest: beside a game the other slot is light, and never a second game', () => {
+    const st = fresh(SUN);
+    choose(st, day(2), 'w2', 'sport');
+    const list = Tr.suggest(st, day(2), 'w1', 6);
+    eq(['walk', 'mob'].includes(list[0].cat), true); eq(list[0].reason, 'ביום משחק האימון השני קל');
+    eq(list.some((x) => x.cat === 'sport'), false);
+  });
+  test('suggest: beside a run there is no second run and no leg strength', () => {
+    const st = fresh(SUN);
+    choose(st, day(2), 'w2', 'run');
+    const list = Tr.suggest(st, day(2), 'w1', 6).map((x) => x.cat);
+    eq(list.includes('run'), false); eq(list.includes('str_low'), false); eq(list.length >= 3, true);
+  });
+  test('suggest: a full category is excluded; with everything full it falls back to easy sessions', () => {
+    const st = fresh(SUN);
+    for (let i = 0; i < 5; i++) doWorkout(st, day(i), 'w1', 'walk');          // the 5 walks of the week are done
+    const others = Tr.suggest(st, day(5), 'w1', 6).map((x) => x.cat);
+    eq(others.includes('walk'), false); eq(others.length >= 4, true);         // walks excluded, everything else still offered
+    const st2 = fresh(SUN);
+    st2.days[day(2)] = D.newDay();
+    const everything = { str_up: 2, str_low: 2, sport: 2, run: 1, walk: 5, mob: 2 };
+    let n = 0; Object.entries(everything).forEach(([c, k]) => { for (let i = 0; i < k; i++, n++) doWorkout(st2, day(Math.floor(n / 2)), n % 2 ? 'w2' : 'w1', c); });
+    const out = Tr.suggest(st2, day(6), 'w1');
+    eq(out.length >= 1, true); eq(out[0].reason, 'המכסה מלאה — אימון קל נוסף');
+  });
+  test('suggest: prefers an outdoor category when the other slot is indoor', () => {
+    const st = fresh(SUN);
+    choose(st, day(3), 'w2', 'str_low');
+    const top = Tr.suggest(st, day(3), 'w1')[0];
+    eq(top.cat, 'walk'); eq(top.reason, 'אימון בחוץ להיום');
+  });
+
+  test('hints: nothing on a clean day', () => {
+    const st = fresh(SUN);
+    eq(Tr.hints(st, day(0)), []);
+    choose(st, day(0), 'w1', 'str_up');
+    eq(Tr.hints(st, day(0)), []);                                             // one slot planned: too early to nag about outdoors
+  });
+  test('hints: no_outdoor appears only when both are planned indoors, and clears', () => {
+    const st = fresh(SUN);
+    choose(st, day(0), 'w1', 'str_up'); choose(st, day(0), 'w2', 'mob');
+    eq(Tr.hints(st, day(0)).map((h) => h.id), ['no_outdoor']);
+    choose(st, day(0), 'w2', 'walk');
+    eq(Tr.hints(st, day(0)).map((h) => h.id), []);                            // a walk is outdoors by nature
+    choose(st, day(0), 'w2', 'mob'); doWorkout(st, day(0), 'w1', 'str_up', { outdoor: true });
+    eq(Tr.hints(st, day(0)).map((h) => h.id), []);                            // a finished workout flagged outdoors satisfies it
+  });
+  test('hints: leg strength on a run day, and a hard session beside a game', () => {
+    const st = fresh(SUN);
+    choose(st, day(1), 'w1', 'str_low'); choose(st, day(1), 'w2', 'run');
+    eq(Tr.hints(st, day(1)).map((h) => h.id), ['leg_on_run_day']);
+    choose(st, day(2), 'w1', 'str_up'); choose(st, day(2), 'w2', 'sport');
+    eq(Tr.hints(st, day(2)).map((h) => h.id).includes('game_light_first'), true);
+    choose(st, day(3), 'w1', 'walk'); choose(st, day(3), 'w2', 'sport');
+    eq(Tr.hints(st, day(3)).map((h) => h.id).includes('game_light_first'), false);
+  });
+  test('hints: mobility is due after a game until it is planned or the quota is met', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w2', 'sport');
+    eq(Tr.hints(st, day(1)).map((h) => h.id), ['mobility_due']);
+    choose(st, day(1), 'w1', 'mob');
+    eq(Tr.hints(st, day(1)).map((h) => h.id).includes('mobility_due'), false);
+    const st2 = fresh(SUN);
+    doWorkout(st2, day(0), 'w2', 'sport'); doWorkout(st2, day(0), 'w1', 'mob'); doWorkout(st2, day(1), 'w1', 'mob');
+    eq(Tr.hints(st2, day(1)).map((h) => h.id).includes('mobility_due'), false);   // both mobility sessions already done
+  });
+
+  test('setWorkoutChoice: sets category + session, clears, and is refused when done / other day / bad id', () => {
+    const st = fresh(SUN); const now = T(2026, 6, 7, 9);
+    eq(D.setWorkoutChoice(st, SUN, now, 'w1', { cat: 'walk', plan: 'הליכה מהירה בחוץ' }), true);
+    eq([st.days[SUN].w1.cat, st.days[SUN].w1.plan], ['walk', 'הליכה מהירה בחוץ']);
+    eq(D.setWorkoutChoice(st, SUN, now, 'w1', { cat: '', plan: '' }), true);
+    eq(st.days[SUN].w1.cat, undefined); eq(st.days[SUN].w1.plan, undefined);
+    eq(D.setWorkoutChoice(st, SUN, now, 'w2', { cat: 'Bad Cat!', plan: 'x' }), true);
+    eq(st.days[SUN].w2.cat, undefined); eq(st.days[SUN].w2.plan, 'x');          // an invalid category id is ignored
+    D.setWorkout(st, SUN, now, 'w1', { done: true });
+    eq(D.setWorkoutChoice(st, SUN, now, 'w1', { cat: 'mob', plan: 'x' }), false);   // finished workouts keep what they were
+    eq(D.setWorkoutChoice(st, D.addDays(SUN, 1), now, 'w2', { cat: 'mob', plan: 'x' }), false);
+    eq(D.setWorkoutChoice(st, SUN, now, 'water', { cat: 'mob', plan: 'x' }), false);
+  });
+
+  test('migration: a save from the previous release (weekday template + default calendar) keeps counting', () => {
+    const wk = (done, extra) => Object.assign({ done, outdoor: false }, extra);
+    const old = { v: 1, run: { attempt: 1, startDate: SUN, startedAtMs: 1 }, settings: { weekPlan: [null, null, { w2: 'פאדל עם חברים' }, null, null, null, null] },
+      days: {
+        '2026-06-08': { tasks: {}, w1: wk(true), w2: wk(true) },                          // Monday, default calendar
+        '2026-06-09': { tasks: {}, w1: wk(false), w2: wk(true) },                         // Tuesday: weekly template custom w2
+        '2026-06-10': { tasks: {}, w1: wk(true, { plan: 'שחייה' }), w2: wk(true, { plan: 'ריצה קלה' }) }   // Wednesday: overrides
+      } };
+    const loaded = Store.normalize(old);
+    eq(loaded.settings.weekPlan, undefined);                                              // template dropped
+    eq([loaded.days['2026-06-08'].w1.cat, loaded.days['2026-06-08'].w2.cat], ['str_up', 'str_low']);   // Monday defaults
+    eq([loaded.days['2026-06-09'].w2.cat, loaded.days['2026-06-09'].w2.plan], ['sport', 'פאדל עם חברים']);
+    eq(loaded.days['2026-06-09'].w1.cat, undefined);                                      // not done: untouched
+    eq(loaded.days['2026-06-10'].w1.cat, undefined); eq(loaded.days['2026-06-10'].w2.cat, 'run');   // unknown stays uncategorised
+    const pr = Tr.weekProgress(loaded, '2026-06-10');
+    eq(pr.cats.map((c) => c.done), [1, 1, 1, 1, 0, 0]); eq(pr.other, 1);
+  });
+
   // ---------- full 75 days ----------
   test('completing day 75 finishes the challenge', () => {
     const s = fresh(); let last;
@@ -532,7 +719,7 @@
   // ---------- storage ----------
   test('store: export -> import round-trips state', () => {
     const s = fresh(); const now = T(2026, 6, 1, 20);
-    fullDay(s, START, now); D.setWorkoutPlan(s, START, now, 'w2', 'x');
+    fullDay(s, START, now); D.setWorkoutChoice(s, START, now, 'w2', { cat: 'walk', plan: 'x' });
     const back = Store.importJson(Store.exportJson(s));
     eq(back.days[START].waterMl, D.WATER_GOAL_ML);
     eq(back.days[START].read, true); eq(back.run.startDate, START);
@@ -542,17 +729,17 @@
     const old = { v: 1, run: null, days: {}, settings: { cutoffHour: 4, gapHours: 3.5, bottleMl: 750, glassMl: 250,
       reminders: { photo: '06:30' }, ruleNames: { r2: 'שם שלי', r3: 'כלל אישי 3 — מקס׳ פעם בשבוע' } } };
     const s = Store.normalize(old);
-    eq(s.settings.weekPlan, [null, null, null, null, null, null, null]);
+    eq(s.settings.weekPlan, undefined);                                   // the weekday template no longer exists
     eq(s.settings.cutoffHour, 4); eq(s.settings.bottleMl, 750);          // user's values survive
     eq(s.settings.reminders.photo, '06:30'); eq(s.settings.reminders.w1, '08:30');   // missing cues filled
     eq(s.settings.ruleNames.r2, 'שם שלי');
     // and it must not alias the defaults: mutating one result can't leak into the next
-    s.settings.weekPlan[1] = { w1: 'x' };
-    eq(Store.normalize(old).settings.weekPlan[1], null);
+    s.settings.reminders.photo = '01:00'; s.settings.ruleNames.r2 = 'leak?';
+    eq(Store.normalize(old).settings.reminders.photo, '06:30'); eq(Store.normalize({ v: 1, run: null, days: {} }).settings.ruleNames.r2, 'כלל אישי 2');
   });
   test('store: a very old save with no settings at all still loads with every default', () => {
     const s = Store.normalize({ v: 1, run: null, days: {} });
-    eq(s.settings.reminders.endday, '22:30'); eq(s.settings.weekPlan.length, 7); eq(s.settings.ruleNames.r2, 'כלל אישי 2');
+    eq(s.settings.reminders.endday, '22:30'); eq(s.settings.ruleNames.r2, 'כלל אישי 2');
   });
   test('store migration: old pages/book/takeaway/r3Log/tasks become read:true, junk dropped', () => {
     const old = { v: 1, run: null, r3Log: ['2026-06-01'], days: {
@@ -580,7 +767,7 @@
     const old = { v: 1, days: { '2026-06-01': { tasks: { meal1: true } } }, run: null };
     const s = Store.normalize(old);
     eq(s.days['2026-06-01'].w1.done, false); eq(s.settings.gapHours, 3); eq(s.r3Log, undefined);
-    eq(s.settings.weekPlan.length, 7); eq(s.days['2026-06-01'].read, false);
+    eq(s.days['2026-06-01'].read, false);
   });
   // In-memory stand-in for localStorage: these tests must NEVER touch the real save
   // (this page shares an origin with the app, and is deployed with it).
@@ -603,7 +790,7 @@
       eq(Store.save(s), true);
       const r = Store.load();
       eq(r.error, null); eq(r.state.days[START].read, true); eq(r.state.run.startDate, START);
-      eq(Store.load().state.settings.weekPlan.length, 7);
+      eq(Store.load().state.settings.cutoffHour, 5);
     } finally { Store.useBackend(null); }
   });
   test('store: unavailable storage (throws) degrades to a fresh state, save reports failure', () => {
