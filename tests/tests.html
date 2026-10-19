@@ -11,6 +11,8 @@
 <script src="../js/day.js"></script>
 <script src="../js/store.js"></script>
 <script src="../js/reminders.js"></script>
+<script src="../js/fireworks.js"></script>
+<script src="../js/note.js"></script>
 <script src="../data/ingredients.he.js"></script>
 <script src="../js/plate.js"></script>
 <script src="../data/workouts.he.js"></script>
@@ -645,6 +647,79 @@
     const s = fresh(); finishDay(s, 1);
     const loaded = Store.normalize(JSON.parse(JSON.stringify(s)));                     // notesShown: [] (day 1 not shown)
     eq(loaded.notesShown, []); eq(D.pendingNote(loaded).n, 75);
+  });
+
+  // ---------- sticky-note colours + fireworks ----------
+  test('note palette: 7 sticky-note colours, every stop a valid hex colour, ids unique', () => {
+    eq(Note.PALETTE.length, 7);
+    eq(new Set(Note.PALETTE.map((c) => c.id)).size, 7);
+    Note.PALETTE.forEach((c) => ['top', 'bottom', 'band', 'flapA', 'flapB', 'fold', 'cap'].forEach((k) => {
+      if (!/^#[0-9a-f]{6}$/i.test(c[k])) throw new Error(`${c.id}.${k} = ${c[k]}`);
+    }));
+    eq(Note.PALETTE.map((c) => c.id).slice(0, 4), ['yellow', 'pink', 'blue', 'green']);
+  });
+  test('colorIndex: stable per day, never the same colour two days in a row, every colour shows up', () => {
+    [1, 2, 3, 7].forEach((attempt) => {
+      const seq = []; for (let d = 1; d <= 75; d++) seq.push(Note.colorIndex(attempt, d));
+      for (let d = 1; d < seq.length; d++) if (seq[d] === seq[d - 1]) throw new Error(`attempt ${attempt}: day ${d + 1} repeats the colour`);
+      eq(new Set(seq).size, 7, `attempt ${attempt} uses every colour`);
+      for (let d = 1; d <= 75; d++) eq(Note.colorIndex(attempt, d), seq[d - 1]);          // asking again gives the same colour
+    });
+    eq(Note.colorIndex(1, 0), Note.colorIndex(1, 1));                                      // junk day numbers don't crash
+    eq(Note.colorIndex(1, 'x'), Note.colorIndex(1, 1));
+  });
+  test('colorIndex: a new attempt gets its own colour sequence', () => {
+    const a = [], b = [];
+    for (let d = 1; d <= 30; d++) { a.push(Note.colorIndex(41, d)); b.push(Note.colorIndex(42, d)); }
+    eq(a.join() === b.join(), false);
+  });
+  test('Note.svg: palette colour, fall wrapper, animation class only for its mode, unique ids', () => {
+    const show = Note.svg(75, { dayNumber: 1, color: 2, mode: 'show' }), calm = Note.svg(75, { color: 1, mode: 'calm', caption: false }), plain = Note.svg(9, { color: 5 });
+    eq(show.includes(Note.PALETTE[2].top) && show.includes(Note.PALETTE[2].bottom), true);
+    eq(show.includes('class="nfall"') && show.includes('class="nbody"'), true);
+    eq(show.includes('note-anim') && !show.includes('note-calm'), true);
+    eq(calm.includes('note-calm') && !calm.includes('note-anim'), true);
+    eq(plain.includes('note-anim') || plain.includes('note-calm'), false);
+    eq(show.includes(`--fall-at:${Note.TIMING.fallAt}ms`), true);
+    eq(show.includes('יום 1 הושלם') && !calm.includes('ncap'), true);
+    const ids = [show, calm, plain].flatMap((x) => x.match(/id="nt\d+[bfts]"/g));
+    eq(new Set(ids).size, ids.length);
+    eq(Note.svg(1, { color: 99 }).includes(Note.PALETTE[99 % 7].top), true);              // out-of-range colour wraps instead of crashing
+  });
+  test('Note.TIMING: the peel comes before the swing, the fall after it', () => {
+    eq(Note.TIMING.peel < Note.TIMING.wobbleAt && Note.TIMING.wobbleAt < Note.TIMING.fallAt, true);
+  });
+
+  const seeded = (seed) => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  test('Fireworks.createParticles: the right count, finite values, speed bounded by power, palette colours', () => {
+    const ps = Fireworks.createParticles(100, 200, 40, 5, seeded(7));
+    eq(ps.length, 40);
+    ps.forEach((q) => {
+      if (![q.x, q.y, q.vx, q.vy, q.max, q.size].every(Number.isFinite)) throw new Error('non-finite');
+      if (Math.hypot(q.vx, q.vy) > 5 * 1.2 + 1e-9) throw new Error('too fast');
+      if (!Fireworks.COLORS.includes(q.color)) throw new Error('colour');
+      eq([q.x, q.y, q.px, q.py], [100, 200, 100, 200]);
+    });
+    eq(new Set(ps.map((q) => q.color)).size >= 4, true);                                   // a mix of colours
+    eq(Fireworks.createParticles(0, 0, 0, 5).length, 0);
+  });
+  test('Fireworks.step: gravity pulls sparks down, drag slows them, they expire', () => {
+    const q = { x: 0, y: 0, px: 0, py: 0, vx: 4, vy: 0, life: 0, max: 60 };
+    Fireworks.step(q, 1);
+    eq(q.vy > 0, true); eq(q.vx < 4 && q.vx > 0, true); eq(q.x > 0 && q.y > 0, true); eq(q.px, 0);
+    const lifeSpan = { x: 0, y: 0, px: 0, py: 0, vx: 1, vy: 0, life: 0, max: 60 };
+    let calls = 0; while (true) { calls++; if (!Fireworks.step(lifeSpan, 1)) break; }
+    eq(calls, 60);                                                                         // expires on the step where life reaches `max`
+    const slow = { x: 0, y: 0, px: 0, py: 0, vx: 4, vy: 0, life: 0, max: 60 }, fast = { ...slow };
+    Fireworks.step(slow, 1); Fireworks.step(fast, 2);
+    eq(fast.x > slow.x, true);                                                             // a longer frame moves further
+  });
+  test('Fireworks.step: a rocket flies straight (no gravity) and arrives at its target', () => {
+    const r = { x: 0, y: 300, px: 0, py: 300, vx: 26 / 26 * 5, vy: -300 / 26, life: 0, max: 26, rocket: { x: 130, y: 0, count: 1, power: 1 } };
+    for (let i = 0; i < 25; i++) Fireworks.step(r, 1);
+    eq(Math.abs(r.vy - (-300 / 26)) < 1e-9, true);                                         // velocity untouched
+    eq(Math.abs(r.x - 125) < 1e-6 && Math.abs(r.y - (300 - 25 * 300 / 26)) < 1e-6, true);
+    eq(Fireworks.step(r, 1), false);                                                       // expires on arrival (the loop then explodes it)
   });
 
   // ---------- plate builder ----------
