@@ -1,11 +1,11 @@
 // Offline cache. Same-origin files are network-first (fresh when online, cached when offline);
 // the SHELL list is precached for first offline use. Bump CACHE when the file list changes
 // (and App.version in js/app.js on every release so the user can see which build is running).
-const CACHE = '75hard-v10';
+const CACHE = '75hard-v11';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './js/app.js', './js/day.js', './js/store.js', './js/photos.js',
-  './js/views/today.js', './js/views/meals.js', './js/views/workouts.js', './js/views/more.js', './js/views/progress.js', './js/views/settings.js', './js/reminders.js', './js/note.js', './js/fireworks.js', './js/plate.js', './data/ingredients.he.js',
+  './js/views/today.js', './js/views/meals.js', './js/views/workouts.js', './js/views/more.js', './js/views/progress.js', './js/views/settings.js', './js/reminders.js', './js/note.js', './js/stats.js', './js/views/stats.js', './js/fireworks.js', './js/plate.js', './data/ingredients.he.js',
   './data/training.he.js', './js/training.js', './data/meals.he.js', './data/workouts.he.js', './data/rules.he.js',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'
 ];

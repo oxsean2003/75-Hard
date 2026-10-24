@@ -386,3 +386,26 @@ input[type=date]::-webkit-datetime-edit, input[type=time]::-webkit-datetime-edit
 .q-dots { display: flex; gap: 5px; letter-spacing: 0; }
 .q-dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--good); box-sizing: border-box; }
 .q-dots i.on { background: var(--good); }
+
+/* ---- round 7: statistics ---- */
+.bg-str_up { background: #ff8a4c; } .bg-str_low { background: #ff6b6b; } .bg-sport { background: #ffc247; }
+.bg-run { background: #4aa8ff; } .bg-walk { background: #3ddc84; } .bg-mob { background: #b78cff; }
+.st-h { margin: 0 0 10px; font-size: 14px; font-weight: 800; color: var(--muted); }
+.st-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.st-name { flex: 0 0 38%; font-weight: 700; font-size: 14px; min-width: 0; }
+.st-bar { flex: 1; height: 10px; background: var(--surface2); border-radius: 6px; overflow: hidden; direction: ltr; }
+.st-bar i { display: block; height: 100%; border-radius: 6px; }
+.st-bar i:not([class*="bg-"]) { background: var(--accent); }   /* category bars keep their own colour */
+.st-cnt { width: 28px; text-align: end; font-weight: 800; font-variant-numeric: tabular-nums; }
+.st-wd { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
+.st-wd > div { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.st-wdbar { width: 100%; max-width: 26px; height: 64px; background: var(--surface2); border-radius: 6px; display: flex; align-items: flex-end; overflow: hidden; }
+.st-wdbar i { display: block; width: 100%; background: var(--accent); border-radius: 6px 6px 0 0; }
+.st-wd b { font-size: 14px; } .st-wd small { color: var(--muted); font-size: 12px; }
+.st-week { padding: 8px 0; border-top: 1px solid var(--line); }
+.st-week:first-of-type { border-top: 0; }
+.st-wk-h { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; margin-bottom: 6px; }
+.st-wk-h span { color: var(--muted); font-weight: 700; white-space: nowrap; }
+.wkbar { display: flex; height: 12px; background: var(--surface2); border-radius: 6px; overflow: hidden; direction: ltr; }
+.wkbar i { display: block; height: 100%; }
+.st-top { margin: 6px 0; font-size: 14px; }

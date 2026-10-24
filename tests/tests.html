@@ -18,6 +18,8 @@
 <script src="../data/workouts.he.js"></script>
 <script src="../data/training.he.js"></script>
 <script src="../js/training.js"></script>
+<script src="../js/stats.js"></script>
+<script src="../data/meals.he.js"></script>
 <script>
 (function () {
   const D = Day;
@@ -789,6 +791,120 @@
   test('store: a save without pantryMissing loads with [] and junk ids are dropped', () => {
     eq(Store.normalize({ v: 1, run: null, days: {} }).pantryMissing, []);
     eq(Store.normalize({ v: 1, run: null, days: {}, pantryMissing: ['rice', 5, null, 'tuna'] }).pantryMissing, ['rice', 'tuna']);
+  });
+
+  // ---------- statistics ----------
+  const St = Stats;
+  const nowOf = (key, h) => { const [y, m, d] = key.split('-').map(Number); return T(y, m, d, h || 12); };
+  // log a meal on its own day so the guards pass
+  const eat = (st, key, task, text, info) => D.setMeal(st, key, nowOf(key), task, text, info);
+  const closeOk = (st, key) => { D.ensureDay(st, key).closed = { at: 1, ok: true, auto: false, missing: [] }; };
+
+  test('setMeal records how a meal was logged; un-ticking forgets text and info', () => {
+    const st = fresh(SUN);
+    eat(st, SUN, 'meal1', 'ביצי עין + לחם מחמצת', { src: 'plate', items: ['egg_fried', 'sourdough', 42, null] });
+    eq(st.days[SUN].mealInfo.meal1, { src: 'plate', items: ['egg_fried', 'sourdough'] });     // junk ids dropped
+    eat(st, SUN, 'meal2', 'קבבי בקר', { src: 'quick', cat: 'beef' });
+    eq(st.days[SUN].mealInfo.meal2, { src: 'quick', cat: 'beef' });
+    eat(st, SUN, 'meal3', 'משהו', { src: 'bogus' });
+    eq(st.days[SUN].mealInfo.meal3, undefined);                                              // unknown source: not recorded
+    D.setTask(st, SUN, nowOf(SUN), 'meal1', false);
+    eq([st.days[SUN].tasks.meal1, st.days[SUN].meals.meal1, st.days[SUN].mealInfo.meal1], [false, undefined, undefined]);
+    eq(st.days[SUN].mealInfo.meal2.cat, 'beef');                                             // other meals untouched
+  });
+  test('setMeal without info (old call style) still works and clears stale info', () => {
+    const st = fresh(SUN);
+    eat(st, SUN, 'meal1', 'a', { src: 'plate', items: ['tuna'] });
+    eat(st, SUN, 'meal1', 'b');
+    eq(st.days[SUN].meals.meal1, 'b'); eq(st.days[SUN].mealInfo.meal1, undefined);
+  });
+
+  test('Stats.workouts: totals, minutes, outdoor, categories, weekdays for the current attempt', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'walk', { min: 50, outdoor: true }); doWorkout(st, day(0), 'w2', 'str_up', { min: 45 });
+    doWorkout(st, day(1), 'w1', 'sport', { min: 95, outdoor: true }); doWorkout(st, day(1), 'w2', 'walk', { min: 40, outdoor: true });
+    doWorkout(st, day(2), 'w1', 'zzz', { min: 30 });                                         // uncategorised
+    const w = St.workouts(st, day(2));
+    eq([w.sessions, w.minutes, w.avgMin, w.longest, w.outdoor, w.indoor, w.other], [5, 260, 52, 95, 3, 2, 1]);
+    eq(w.cats.map((c) => [c.id, c.count]), [['str_up', 1], ['str_low', 0], ['sport', 1], ['run', 0], ['walk', 2], ['mob', 0]]);
+    eq(w.cats.find((c) => c.id === 'walk').minutes, 90);
+    eq(w.weekdays, [2, 2, 1, 0, 0, 0, 0]);                                                   // Sun, Mon, Tue (the run starts on a Sunday)
+  });
+  test('Stats.workouts: workouts without minutes count as sessions but not in the time average', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'walk', { min: 60 }); doWorkout(st, day(0), 'w2', 'mob', { min: undefined });
+    const w = St.workouts(st, day(0));
+    eq([w.sessions, w.minutes, w.avgMin], [2, 60, 60]);
+  });
+  test('Stats.workouts: weeks list newest first, partial first week flagged, current week marked', () => {
+    const st = fresh(), mon = START;                                                          // starts Monday 2026-06-01: week of Sun 05-31 is partial
+    SAMPLE.forEach(([a, b], i) => { doWorkout(st, D.addDays(SUN, i), 'w1', a); doWorkout(st, D.addDays(SUN, i), 'w2', b); });   // week of 06-07: 14/14
+    doWorkout(st, mon, 'w1', 'walk');
+    const w = St.workouts(st, D.addDays(SUN, 8));                                            // Tuesday of the third week
+    eq(w.weeks.map((x) => x.start), ['2026-06-14', '2026-06-07', '2026-05-31']);
+    eq(w.weeks.map((x) => x.current), [true, false, false]);
+    eq(w.weeks.map((x) => x.partial), [false, false, true]);
+    eq(w.weeks[1].done, 14); eq(w.weeks[0].done, 0); eq(w.weeks[2].done, 1);
+    eq(w.weeks[1].cats.map((c) => c.done), [2, 2, 2, 1, 5, 2]);
+  });
+  test('Stats.workouts: an earlier attempt is not counted, and no run means empty stats', () => {
+    const st = fresh(SUN);
+    doWorkout(st, day(0), 'w1', 'walk');
+    D.manualRestart(st, nowOf(day(1), 10));                                                  // new Day 1 = day(2)
+    eq(St.workouts(st, day(3)).sessions, 0);
+    const none = St.workouts(D.newState(), '2026-06-01');
+    eq([none.sessions, none.weeks], [0, []]);
+  });
+
+  test('Stats.meals: adherence counts only finished days; slots and sources', () => {
+    const st = fresh(SUN);
+    ['meal1', 'meal2', 'meal3'].forEach((t) => eat(st, day(0), t, 'x', { src: 'plate', items: ['tuna', 'rice', 'cucumber'] }));
+    eat(st, day(1), 'meal1', 'y', { src: 'plate', items: ['egg_fried'] }); eat(st, day(1), 'meal2', 'קבבי בקר', { src: 'quick', cat: 'beef' });
+    closeOk(st, day(0)); D.ensureDay(st, day(1)).closed = { at: 1, ok: false, auto: true, missing: ['meal3'] };
+    eat(st, day(2), 'meal1', 'today', { src: 'plate', items: ['tuna'] });                    // today is still open: not counted
+    const m = St.meals(st);
+    eq([m.days, m.possible, m.logged, m.rate], [2, 6, 5, 83]);
+    eq(m.slots.map((s) => s.logged), [2, 2, 1]);
+    eq(m.src, { plate: 4, quick: 1, untracked: 0 });
+  });
+  test('Stats.meals: plate rate, protein sources and the most used ingredients', () => {
+    const st = fresh(SUN);
+    eat(st, day(0), 'meal1', 'a', { src: 'plate', items: ['egg_fried', 'sourdough', 'cucumber', 'tahini'] });   // complete
+    eat(st, day(0), 'meal2', 'b', { src: 'plate', items: ['tuna', 'rice'] });                                   // missing veg/fat
+    eat(st, day(0), 'meal3', 'c', { src: 'plate', items: ['egg_scr', 'rice', 'cucumber', 'olive_oil'] });       // complete
+    closeOk(st, day(0));
+    const m = St.meals(st);
+    eq(m.plate, { total: 3, complete: 2 });
+    eq(m.protein.map((p) => [p.id, p.count]), [['egg', 2], ['fish', 1]]);                   // two egg meals beat one fish meal
+    const veg = m.topByPart.find((p) => p.id === 'veg').items;
+    eq(veg, [{ id: 'cucumber', name: 'מלפפון', count: 2 }]);
+    eq(m.topByPart.find((p) => p.id === 'carb').items[0], { id: 'rice', name: 'אורז (לבן / מלא)', count: 2 });
+    eq(m.topByPart.find((p) => p.id === 'flavor'), undefined);                              // parts nobody used are left out
+  });
+  test('Stats.meals: older meals count as logged; ready-made dish text is recognised, other text is untracked', () => {
+    const st = fresh(SUN);
+    const dish = Meals.CATEGORIES[1].lunch[0];                                               // a dish from the original list
+    D.ensureDay(st, day(0)).tasks = { meal1: true, meal2: true, meal3: true };
+    st.days[day(0)].meals = { meal1: 'ביצי עין + לחם מחמצת', meal2: dish };                    // old save: text only
+    closeOk(st, day(0));
+    const m = St.meals(st);
+    eq(m.logged, 3); eq(m.src, { plate: 0, quick: 1, untracked: 2 });
+    eq(m.protein, []); eq(m.topByPart, []);
+    eq(St.infoFor(st.days[day(0)], 'meal2'), { src: 'quick', cat: Meals.CATEGORIES[1].id });
+  });
+  test('Stats.meals: nothing finished yet -> zeros, no division by zero; unknown ingredient ids ignored', () => {
+    const empty = St.meals(fresh(SUN));
+    eq([empty.days, empty.possible, empty.logged, empty.rate], [0, 0, 0, 0]);
+    const st = fresh(SUN);
+    eat(st, day(0), 'meal1', 'x', { src: 'plate', items: ['not-a-real-item', 'tuna'] }); closeOk(st, day(0));
+    const m = St.meals(st);
+    eq(m.protein.map((p) => p.id), ['fish']); eq(m.plate.total, 1);
+  });
+  test('store: a save from before the stats update (no mealInfo) loads and still yields stats', () => {
+    const old = { v: 1, run: { attempt: 1, startDate: SUN, startedAtMs: 1 }, days: { [SUN]: { tasks: { meal1: true }, meals: { meal1: 'text' }, closed: { at: 1, ok: false, auto: true, missing: [] } } } };
+    const loaded = Store.normalize(old);
+    eq(loaded.days[SUN].mealInfo, {});
+    eq(St.meals(loaded).logged, 1);
   });
 
   // ---------- storage ----------

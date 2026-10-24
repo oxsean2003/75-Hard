@@ -62,6 +62,7 @@
     return {
       tasks: {},
       meals: {},            // meal1..3 -> short text of what was eaten (from the meal guide)
+      mealInfo: {},         // meal1..3 -> { src: 'plate' | 'quick', items?: [ingredient ids], cat? } for the statistics
       waterMl: 0,
       read: false,          // 10 pages of a physical non-fiction book: just a checkmark
       photo: false,
@@ -243,11 +244,21 @@
     fn(ensureDay(state, key));
     return true;
   }
+  // Un-ticking a meal also forgets what it was, so stale text/info can never skew the statistics.
   const setTask = (s, key, now, id, val) => TASK_IDS.includes(id)
-    && edit(s, key, now, (d) => { d.tasks[id] = !!val; });
+    && edit(s, key, now, (d) => { d.tasks[id] = !!val; if (!val) { delete d.meals[id]; if (d.mealInfo) delete d.mealInfo[id]; } });
   // Log a meal from the guide: ticks the meal task and remembers what it was.
-  const setMeal = (s, key, now, id, text) => ['meal1', 'meal2', 'meal3'].includes(id)
-    && edit(s, key, now, (d) => { d.tasks[id] = true; d.meals[id] = String(text || '').slice(0, 200); });
+  // `info` (optional) records HOW it was logged for the statistics: { src: 'plate', items: [ids] } or { src: 'quick', cat }.
+  const setMeal = (s, key, now, id, text, info) => ['meal1', 'meal2', 'meal3'].includes(id)
+    && edit(s, key, now, (d) => {
+      d.tasks[id] = true; d.meals[id] = String(text || '').slice(0, 200);
+      if (!d.mealInfo) d.mealInfo = {};
+      if (info && (info.src === 'plate' || info.src === 'quick')) {
+        d.mealInfo[id] = { src: info.src };
+        if (info.src === 'plate') d.mealInfo[id].items = (Array.isArray(info.items) ? info.items : []).filter((x) => typeof x === 'string').slice(0, 30);
+        if (info.src === 'quick' && typeof info.cat === 'string') d.mealInfo[id].cat = info.cat.slice(0, 20);
+      } else delete d.mealInfo[id];
+    });
   const addWater = (s, key, now, ml) => edit(s, key, now, (d) => { d.waterMl = Math.max(0, d.waterMl + ml); });
   const setPhoto = (s, key, now, has) => edit(s, key, now, (d) => { d.photo = !!has; });
   const setRead = (s, key, now, val) => edit(s, key, now, (d) => { d.read = !!val; });

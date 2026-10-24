@@ -120,7 +120,7 @@
     app.act('pickMeal', (el) => {
       const slot = currentSlot(app), cat = M.CATEGORIES.find((c) => c.id === el.dataset.cat);
       const text = cat[slot.id][Number(el.dataset.i)];
-      if (D.setMeal(app.state, app.status().today, app.now(), slot.task, text)) {
+      if (D.setMeal(app.state, app.status().today, app.now(), slot.task, text, { src: 'quick', cat: cat.id })) {
         app.commit(); app.render(); app.toast(`נרשם: ארוחת ${slot.name}`);
       }
     });
@@ -160,7 +160,7 @@
     app.act('plateLog', () => {
       const slot = currentSlot(app), text = P.compose(ui.sel[slot.id]);
       if (!text) return;
-      if (D.setMeal(app.state, app.status().today, app.now(), slot.task, text)) {
+      if (D.setMeal(app.state, app.status().today, app.now(), slot.task, text, { src: 'plate', items: ui.sel[slot.id].slice() })) {
         ui.sel[slot.id] = [];
         app.commit(); app.render(); app.toast(`נרשם: ארוחת ${slot.name}`);
       }
