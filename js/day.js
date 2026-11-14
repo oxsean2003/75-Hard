@@ -53,6 +53,7 @@
       celebrated: [],       // milestone ids already shown, 'attempt:day'
       notesShown: [],       // sticky-note ids already shown, 'attempt:dayNumber'
       pantryMissing: [],    // plate builder: ids of ingredients NOT at home (default: everything is)
+      homeRun: null,        // a home-workout in progress (see js/homeworkout.js): { planId, startedAt, pausedAt, pausedMs, skips, dayKey }
       lastBackupAt: null,
       completedAt: null
     };

@@ -18,6 +18,8 @@
 <script src="../data/workouts.he.js"></script>
 <script src="../data/training.he.js"></script>
 <script src="../js/training.js"></script>
+<script src="../data/home-plans.he.js"></script>
+<script src="../js/homeworkout.js"></script>
 <script src="../js/stats.js"></script>
 <script src="../data/meals.he.js"></script>
 <script>
@@ -905,6 +907,210 @@
     const loaded = Store.normalize(old);
     eq(loaded.days[SUN].mealInfo, {});
     eq(St.meals(loaded).logged, 1);
+  });
+
+  // ---------- home-workout player ----------
+  const HW = HomeWorkout, PLANS = HomePlans.PLANS, plan1 = PLANS[0];
+  const C1 = HW.compile(plan1), TOTAL = C1.totalMs;
+  const byId = (id) => PLANS.find((p) => p.id === id);
+
+  test('the six plans: unique ids, a valid weekly category each, and every one adds up to exactly 45:00', () => {
+    eq(PLANS.length, 6);
+    eq(new Set(PLANS.map((p) => p.id)).size, 6);
+    PLANS.forEach((p) => {
+      if (!Training.BY.has(p.cat)) throw new Error('bad category ' + p.id);
+      const c = HW.compile(p);
+      eq(c.totalMs, 45 * 60 * 1000, p.id + ' total');
+    });
+    eq(PLANS.map((p) => p.cat), ['str_up', 'mob', 'str_up', 'str_low', 'str_low', 'str_low']);
+  });
+  test('compile: contiguous, no zero-length segments, indexes in order, ends exactly at the total', () => {
+    PLANS.forEach((p) => {
+      const c = HW.compile(p);
+      let t = 0;
+      c.segments.forEach((s, i) => {
+        if (s.startMs !== t || s.endMs <= s.startMs || s.index !== i) throw new Error(`${p.id} segment ${i}`);
+        if (!(s.secs > 0) || s.endMs - s.startMs !== s.secs * 1000) throw new Error(`${p.id} segment ${i} length`);
+        t = s.endMs;
+      });
+      eq(t, c.totalMs);
+      eq(['work', 'rest', 'roundRest', 'block'].includes(c.segments[c.segments.length - 1].kind) && c.segments[c.segments.length - 1].kind !== 'rest', true);   // never ends on a rest
+    });
+  });
+  test('compile: the warm-up has no rests and splits a two-sided exercise into two 30 s parts', () => {
+    const w = C1.segments.slice(0, 12);                                                    // 2 rounds x (3 + 2 parts + 1)
+    eq(w.every((s) => s.kind === 'work'), true);
+    eq(w.slice(0, 6).map((s) => [s.label, s.secs]), [['מעברי 90/90 דינמיים', 60], ['הליכת זחל (Inchworms)', 60], ['חתול-פרה דינמי', 60],
+      ['השחלת מחט ופתיחת חזה · ימין', 30], ['השחלת מחט ופתיחת חזה · שמאל', 30], ['פלאנק גבוה לתנוחת כלב מטה', 60]]);
+    eq(w[6].label, 'מעברי 90/90 דינמיים'); eq(w[6].round, 2); eq(w[0].round, 1);
+  });
+  test('compile: a table block = work, its own rest, ... and the round rest on top between rounds only', () => {
+    eq(C1.segments.length, 63);
+    const b2 = C1.segments.slice(12, 38);                                                  // 3 rounds x 8 + 2 round rests
+    eq(b2.slice(0, 3).map((s) => [s.kind, s.label, s.secs]), [['work', 'פלאנק על כדור', 45], ['rest', 'מנוחה', 15], ['work', 'טוויסט רוסי', 45]]);
+    eq([b2[7].kind, b2[7].secs], ['rest', 15]);                                            // the last row of round 1 still has its own 15 s rest ...
+    eq([b2[8].kind, b2[8].secs, b2[8].label], ['roundRest', 60, 'מנוחה בין סבבים']);        // ... and the full minute comes on top
+    eq([b2[9].label, b2[9].round], ['פלאנק על כדור', 2]);                                 // round 2 starts after it
+    eq(b2[b2.length - 1].kind, 'rest');                                                    // the last round has no minute after it (the next block follows)
+    const rr = C1.segments.filter((s) => s.kind === 'roundRest');
+    eq(rr.length, 4); eq(rr.every((s) => s.secs === 60), true);                           // 2 in block 2, 2 in block 3
+    eq(C1.segments.filter((s) => s.section === 1 && s.kind === 'work').length, 12);
+  });
+  test('compile: the closing minute exists on plans 2, 4, 5 only and is a plain timed block', () => {
+    ['sos', 'dynamic-core', 'combined'].forEach((id) => {
+      const last = HW.compile(byId(id)).segments.slice(-1)[0];
+      eq([last.kind, last.label, last.secs], ['block', 'נשימות וסיום', 60]);
+    });
+    ['core-ball', 'upper-strength', 'balance'].forEach((id) => eq(HW.compile(byId(id)).segments.slice(-1)[0].kind, 'work'));
+  });
+  test('compile: intervals sections work too (not used by the six plans)', () => {
+    const c = HW.compile({ id: 'x', sections: [{ name: 'ספרינטים', kind: 'intervals', repeat: 3, work: { name: 'ספרינט', secs: 30 }, rest: { secs: 90 } }] });
+    eq(c.segments.map((s) => [s.kind, s.secs]), [['work', 30], ['rest', 90], ['work', 30], ['rest', 90], ['work', 30]]);
+    eq(c.totalMs, (30 + 90 + 30 + 90 + 30) * 1000);
+  });
+
+  test('positionAt: segment boundaries are start-inclusive / end-exclusive; before the start and past the end', () => {
+    const p0 = HW.positionAt(C1, 0), pEnd0 = HW.positionAt(C1, 59999), pStart1 = HW.positionAt(C1, 60000);
+    eq([p0.index, p0.remainingMs, p0.done], [0, 60000, false]);
+    eq([pEnd0.index, pEnd0.remainingMs], [0, 1]);
+    eq([pStart1.index, pStart1.intoMs, pStart1.remainingMs], [1, 0, 60000]);
+    const last = HW.positionAt(C1, TOTAL - 1);
+    eq([last.index, last.remainingMs, last.done], [C1.segments.length - 1, 1, false]);
+    eq(HW.positionAt(C1, TOTAL).done, true); eq(HW.positionAt(C1, TOTAL + 99999).done, true);
+    eq(HW.positionAt(C1, -5000).index, 0);
+    eq(HW.positionAt({ segments: [], totalMs: 0 }, 10).done, true);
+    // every boundary of every plan lands on the segment that starts there
+    PLANS.forEach((p) => { const c = HW.compile(p); c.segments.forEach((s) => eq(HW.positionAt(c, s.startMs).index, s.index)); });
+  });
+
+  const T0 = 1_000_000;
+  test('run: elapsed time excludes paused time; pausing twice and resuming twice is harmless', () => {
+    const r = HW.newRun(plan1.id, T0, '2026-06-07');
+    eq(HW.elapsed(r, T0 + 10000), 10000);
+    HW.pause(r, T0 + 10000); HW.pause(r, T0 + 20000);                                      // second pause ignored
+    eq(HW.isPaused(r), true); eq(HW.elapsed(r, T0 + 25000), 10000);                       // frozen while paused
+    HW.resume(r, T0 + 40000); HW.resume(r, T0 + 50000);
+    eq(HW.elapsed(r, T0 + 50000), 20000);                                                  // 10 s + (50 - 40) s, the 30 s pause is gone
+  });
+  test('run: closing and reopening the app (JSON round-trip) gives the same position', () => {
+    const r = HW.newRun(plan1.id, T0);
+    HW.pause(r, T0 + 90000); HW.resume(r, T0 + 100000);
+    const reopened = JSON.parse(JSON.stringify(r));
+    eq(HW.elapsed(reopened, T0 + 200000), HW.elapsed(r, T0 + 200000));
+    eq(HW.positionAt(C1, HW.elapsed(reopened, T0 + 200000)).index, HW.positionAt(C1, HW.elapsed(r, T0 + 200000)).index);
+  });
+  test('run: skip lands on the next segment start and the skipped time is not credited; skipping works while paused', () => {
+    const r = HW.newRun(plan1.id, T0);
+    eq(HW.skip(C1, r, T0 + 30000), true);                                                  // 30 s into segment 0 (60 s)
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 30000)), HW.positionAt(C1, 60000));
+    eq(HW.skippedMs(r), 30000);
+    eq(HW.creditedMin(C1, r), 44);                                                         // 45:00 - 0:30 -> 44 whole minutes
+    HW.pause(r, T0 + 31000);
+    HW.skip(C1, r, T0 + 99000);                                                            // paused: time passing does not matter
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 99000)).index, 2);
+  });
+  test('run: back restarts the segment, or (in its first 2 s) goes to the previous one', () => {
+    const r = HW.newRun(plan1.id, T0);
+    HW.skip(C1, r, T0 + 10000);                                                            // now at segment 1's start
+    HW.back(C1, r, T0 + 11000);                                                            // 1 s into segment 1 -> the previous segment's start
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 11000)).index, 0);
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 11000)).intoMs, 0);
+    HW.back(C1, r, T0 + 20000);                                                            // 9 s into segment 0 (> 2 s) -> restart it
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 20000)).intoMs, 0);
+    HW.back(C1, r, T0 + 20500);                                                            // at index 0 there is nowhere further back
+    eq([HW.positionAt(C1, HW.elapsed(r, T0 + 20500)).index, HW.positionAt(C1, HW.elapsed(r, T0 + 20500)).intoMs], [0, 0]);
+  });
+  test('run: only what you actually replay stops counting as skipped', () => {
+    const r = HW.newRun(plan1.id, T0);
+    HW.skip(C1, r, T0 + 10000);                                                            // skipped 10 s..60 s of segment 0
+    eq(r.skips, [[10000, 60000]]); eq(HW.skippedMs(r), 50000);
+    HW.back(C1, r, T0 + 13000);                                                            // 3 s into segment 1 -> restart segment 1 only
+    eq(HW.skippedMs(r), 50000);                                                            // the skipped part of segment 0 stays skipped
+    HW.back(C1, r, T0 + 13500);                                                            // 0.5 s in -> previous segment (0): the skipped part is replayed now
+    eq(HW.skippedMs(r), 0); eq(r.skips, []);
+    const r2 = HW.newRun(plan1.id, T0);
+    HW.seek(r2, T0, 30000); HW.skip(C1, r2, T0);                                           // skip 30 s..60 s
+    HW.seek(r2, T0, 45000);                                                                // jump back into the middle of the skipped range
+    HW.back(C1, r2, T0);                                                                   // restart segment 0 (target 0): everything after 0 is replayed
+    eq(HW.skippedMs(r2), 0);
+    const r3 = HW.newRun(plan1.id, T0); HW.skip(C1, r3, T0 + 1000); HW.skip(C1, r3, T0 + 2000);   // two segments skipped
+    eq(HW.skippedMs(r3), 59000 + 59000);                                                   // 59 s of segment 0, then 59 s of segment 1 (1 s was played)
+  });
+  test('run: skipping the last segment finishes; a full uninterrupted run credits 45 minutes', () => {
+    const r = HW.newRun(plan1.id, T0);
+    HW.seek(r, T0 + 1000, TOTAL - 5000);                                                   // jump to 5 s before the end
+    eq(HW.skip(C1, r, T0 + 1000), true);
+    eq(HW.positionAt(C1, HW.elapsed(r, T0 + 1000)).done, true);
+    eq(HW.skip(C1, r, T0 + 1000), false);                                                  // nothing left to skip
+    eq(HW.skippedMs(r), 5000);
+    const full = HW.newRun(plan1.id, T0); HW.pause(full, T0 + 1000); HW.resume(full, T0 + 61000);
+    eq(HW.creditedMin(C1, full), 45);                                                      // a minute-long pause does not cost minutes
+  });
+
+  // sweep a whole plan in 250 ms frames and collect every cue
+  const sweep = (c, stepMs) => { const out = []; let prev = 0; for (let e = stepMs; e <= c.totalMs + stepMs; e += stepMs) { HW.cuesBetween(c, prev, e).forEach((q) => out.push(Object.assign({ at: e }, q))); prev = e; } return out; };
+  test('cuesBetween: over a whole plan every boundary gets exactly one change, every segment its 3-2-1, and one done', () => {
+    PLANS.forEach((p) => {
+      const c = HW.compile(p), cues = sweep(c, 250), n = c.segments.length;
+      eq(cues.filter((q) => q.type === 'change').length, n - 1, p.id + ' changes');
+      eq(cues.filter((q) => q.type === 'done').length, 1, p.id + ' done');
+      eq(cues.filter((q) => q.type === 'tick').length, 3 * n, p.id + ' ticks');
+      eq(cues.filter((q) => q.type === 'change').map((q) => q.index), c.segments.slice(1).map((s) => s.index));
+    });
+  });
+  test('cuesBetween: ticks are 3, 2, 1 in order just before each boundary', () => {
+    eq(HW.cuesBetween(C1, 56500, 57000), [{ type: 'tick', n: 3 }]);
+    eq(HW.cuesBetween(C1, 57000, 58000), [{ type: 'tick', n: 2 }]);
+    eq(HW.cuesBetween(C1, 58999, 59000), [{ type: 'tick', n: 1 }]);
+    eq(HW.cuesBetween(C1, 59000, 60000), [{ type: 'change', index: 1 }]);
+    eq(HW.cuesBetween(C1, 57100, 57900), []);                                              // nothing new inside a quiet window
+  });
+  test('cuesBetween: a long gap (phone locked) gives ONE change, never a flood; done once; paused/zero windows give nothing', () => {
+    eq(HW.cuesBetween(C1, 0, 700000), [{ type: 'change', index: HW.positionAt(C1, 700000).index }]);
+    eq(HW.cuesBetween(C1, 0, TOTAL + 5000), [{ type: 'done' }]);
+    eq(HW.cuesBetween(C1, TOTAL, TOTAL + 5000), []);                                       // already done before
+    eq(HW.cuesBetween(C1, 1000, 1000), []); eq(HW.cuesBetween(C1, 2000, 1000), []);
+    eq(HW.cuesBetween({ segments: [], totalMs: 0 }, 0, 5000), []);
+  });
+  test('validRun: accepts a real run, rejects garbage', () => {
+    eq(HW.validRun(HW.newRun('x', 5)), true);
+    eq(HW.validRun({ planId: 'x', startedAt: 5, pausedAt: null, pausedMs: 0 }), true);       // an older shape without skips
+    [null, undefined, 5, 'x', {}, { planId: 5, startedAt: 1, pausedMs: 0, pausedAt: null },
+      { planId: 'x', startedAt: 'now', pausedMs: 0, pausedAt: null }, { planId: 'x', startedAt: 1, pausedMs: -1, pausedAt: null },
+      { planId: 'x', startedAt: 1, pausedMs: 0, pausedAt: 'x' }, { planId: 'x', startedAt: 1, pausedMs: 0, pausedAt: null, skips: 'x' }, { planId: 'x', startedAt: 1, pausedMs: 0, pausedAt: null, skips: [[5, 1]] }]
+      .forEach((bad) => eq(HW.validRun(bad), false, JSON.stringify(bad)));
+  });
+
+  test('logWorkout: a finished plan logs into a free slot with its category, name, real times and credited minutes', () => {
+    const st = fresh(SUN), now = nowOf(SUN, 18);
+    const run = HW.newRun(plan1.id, now - 46 * 60000, SUN);
+    eq(HW.logWorkout(st, SUN, now, 'w2', plan1, C1, run), true);
+    const w = st.days[SUN].w2;
+    eq([w.done, w.cat, w.plan, w.min, w.outdoor, w.startedAt, w.endedAt], [true, 'str_up', 'ליבה ושליטה עם כדורסל', 45, false, run.startedAt, run.startedAt + TOTAL]);   // ended when the plan ran out, not when it was logged
+    eq(Training.catOf(w), 'str_up');                                                       // it counts toward the weekly quota
+    eq(HW.logWorkout(st, SUN, now, 'w2', plan1, C1, run), false);                          // the slot is taken now
+  });
+  test('logWorkout: skipped time lowers the minutes; refused for a running timer, a closed day or another day', () => {
+    const st = fresh(SUN), now = nowOf(SUN, 18);
+    const run = HW.newRun(plan1.id, now - 46 * 60000, SUN); run.skips = [[0, 120000]];
+    HW.logWorkout(st, SUN, now, 'w1', plan1, C1, run);
+    eq(st.days[SUN].w1.min, 43);                                                           // below 45: the day will show it as missing
+    eq(Day.evaluateDay(st, SUN).includes('w1min'), true);
+    const st2 = fresh(SUN); st2.timer = { id: 'w1', dayKey: SUN, startedAt: now, outdoor: false };
+    eq(HW.logWorkout(st2, SUN, now, 'w1', plan1, C1, HW.newRun(plan1.id, now)), false);   // that slot has its own timer
+    eq(HW.logWorkout(st2, SUN, now, 'w2', plan1, C1, HW.newRun(plan1.id, now)), true);    // the other slot is fine
+    const st3 = fresh(SUN); closeOk(st3, SUN);
+    eq(HW.logWorkout(st3, SUN, now, 'w1', plan1, C1, HW.newRun(plan1.id, now)), false);   // closed day
+    eq(HW.logWorkout(fresh(SUN), D.addDays(SUN, 1), now, 'w1', plan1, C1, HW.newRun(plan1.id, now)), false);   // not today
+  });
+  test('store: homeRun survives a reload, and a missing / malformed / unknown-plan one becomes null', () => {
+    const run = HW.newRun(plan1.id, T0, SUN); HW.pause(run, T0 + 5000);
+    const loaded = Store.normalize({ v: 1, run: null, days: {}, homeRun: JSON.parse(JSON.stringify(run)) });
+    ['planId', 'startedAt', 'pausedAt', 'pausedMs', 'skips', 'dayKey'].forEach((k) => eq(loaded.homeRun[k], run[k], k));
+    eq(Store.normalize({ v: 1, run: null, days: {} }).homeRun, null);                      // a save from before this feature
+    eq(Store.normalize({ v: 1, run: null, days: {}, homeRun: { planId: plan1.id, startedAt: 'x' } }).homeRun, null);
+    eq(Store.normalize({ v: 1, run: null, days: {}, homeRun: HW.newRun('no-such-plan', T0) }).homeRun, null);
+    eq(D.newState().homeRun, null);
   });
 
   // ---------- storage ----------

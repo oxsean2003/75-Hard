@@ -193,7 +193,7 @@
     // weekly quota: one line + up to 2 soft hints (the full card lives in the Workouts tab)
     const prog = Training.weekProgress(s, key);
     const weekLine = `<div class="wk-week"><span>השבוע: <b>${prog.total.done}${prog.partial ? '' : '/' + Training.TOTAL}</b> אימונים${prog.partial ? ' (שבוע חלקי)' : ''}</span>
-      <button class="btn mini" data-act="gotoWorkouts">יעד שבועי</button></div>`;
+      <span class="btns"><button class="btn mini" data-act="plChoose">אימון בבית</button><button class="btn mini" data-act="gotoWorkouts">יעד שבועי</button></span></div>`;
     const hintsHtml = locked || app.fix ? '' : Training.hints(s, key).slice(0, 2).map((h) => `<p class="hint-soft">${app.esc(h.text)}</p>`).join('');
 
     const meals = ['meal1', 'meal2', 'meal3'].map((id) => taskHtml(app, id, LABEL[id],
@@ -215,7 +215,7 @@
       </div>
       ${fixBanner}${closedBanner}${nudge}
       <section class="group"><h2>אוכל</h2>${meals}</section>
-      <section class="group"><h2>אימונים</h2>${weekLine}${workoutHtml(app, 'w1', key, day, locked)}${workoutHtml(app, 'w2', key, day, locked)}${hintsHtml}</section>
+      <section class="group"><h2>אימונים</h2>${Views.player.resumeBanner(app)}${weekLine}${workoutHtml(app, 'w1', key, day, locked)}${workoutHtml(app, 'w2', key, day, locked)}${hintsHtml}</section>
       <section class="group"><h2>מים, קריאה ותמונה</h2>${waterHtml(app, day, locked)}${readHtml(app, day, locked)}${photoHtml(app, day, key, locked)}</section>
       ${rulesCard(app)}
       ${app.fix || st.closedToday ? '' : '<button class="btn primary big" data-act="endDay">סיים את היום</button><p class="hint">לפני השינה. אם משהו חסר — תקבלו אזהרה לפני כל איפוס.</p>'}`;

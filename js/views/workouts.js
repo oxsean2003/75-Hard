@@ -86,6 +86,7 @@
         <ol class="plain">${ex.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol></details>`).join('')}`).join('');
 
     return `<h1 class="page-h">אימונים</h1>
+      ${Views.player.card(app)}
       ${quotaCard(app, prog)}
       ${hasRun && (st.phase === 'active' || st.phase === 'pending') ? todayCard(app, st) + weekStrip(app, prog, st) : ''}
       <h2 class="sub-h">שלושה אימוני 45 דקות מוכנים</h2>${routines}

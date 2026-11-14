@@ -13,7 +13,7 @@
   const App = {
     state: loaded.state,
     loadError: loaded.error,
-    version: '2026-10-24 · g',   // bump on every release (shown in עוד) together with CACHE in sw.js
+    version: '2026-11-14 · h',   // bump on every release (shown in עוד) together with CACHE in sw.js
     tab: 'today',
     fix: false,            // fixing the pending (failed) day before confirming a restart
     offset: 0,             // test hook: shifts the clock (ms)

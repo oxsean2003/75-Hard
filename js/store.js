@@ -57,6 +57,10 @@
     out.measurements = Array.isArray(s.measurements) ? s.measurements : [];
     out.celebrated = Array.isArray(s.celebrated) ? s.celebrated : [];
     out.pantryMissing = Array.isArray(s.pantryMissing) ? s.pantryMissing.filter((x) => typeof x === 'string') : [];
+    // A home workout that was running when the app closed: keep it only if it is well-formed and its plan still exists.
+    const hr = s.homeRun, HW = root.HomeWorkout, HP = root.HomePlans;
+    const planKnown = !HP || HP.PLANS.some((p) => hr && p.id === hr.planId);
+    out.homeRun = HW && HW.validRun(hr) && planKnown ? Object.assign({ pausedAt: null, pausedMs: 0, skips: [], dayKey: null }, hr) : null;
     const hadNotes = Array.isArray(s.notesShown);
     out.notesShown = hadNotes ? s.notesShown : [];
     delete out.r3Log;                                   // weekly rule was removed
