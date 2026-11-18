@@ -20,6 +20,8 @@
 <script src="../js/training.js"></script>
 <script src="../data/home-plans.he.js"></script>
 <script src="../js/homeworkout.js"></script>
+<script src="../data/home-blocks.he.js"></script>
+<script src="../js/homeblocks.js"></script>
 <script src="../js/stats.js"></script>
 <script src="../data/meals.he.js"></script>
 <script>
@@ -1112,6 +1114,58 @@
     eq(Store.normalize({ v: 1, run: null, days: {}, homeRun: { planId: plan1.id, startedAt: 'x' } }).homeRun, null);
     eq(Store.normalize({ v: 1, run: null, days: {}, homeRun: HW.newRun('no-such-plan', T0) }).homeRun, null);
     eq(D.newState().homeRun, null);
+  });
+
+  // ---------- custom block workout ----------
+  const HB = HomeBlocks;
+  const seqRng = (vals) => { let i = 0; return () => vals[i++ % vals.length]; };
+  const mk = (...mins) => ({ blocks: mins.map((m, i) => HB.newBlock(HB.THEMES[i % HB.THEMES.length].id, m, seqRng([0.1, 0.5, 0.9]))) });
+  test('blocks: every theme has enough slots/options, and every 10/15 block compiles to exactly 10:00 / 15:00', () => {
+    HB.THEMES.forEach((th) => {
+      eq(th.slots.length >= 5, true, th.id + ' has 5 slots');
+      th.slots.forEach((s) => eq(s.options.length >= 4, true, th.id + '/' + s.name + ' has options'));
+      [10, 15].forEach((m) => {
+        const c = HW.compile(HB.buildPlan({ blocks: [HB.newBlock(th.id, m, Math.random)] }));
+        eq(c.totalMs, m * 60000, th.id + ' ' + m);
+      });
+    });
+  });
+  test('blocks: any mix of blocks adds up (15+15+15 = 15+10+10+10 = 45:00) with no rests dropped', () => {
+    eq(HW.compile(HB.buildPlan(mk(15, 15, 15))).totalMs, 45 * 60000);
+    eq(HW.compile(HB.buildPlan(mk(15, 10, 10, 10))).totalMs, 45 * 60000);
+    eq(HB.totalMin(mk(15, 10, 10, 10)), 45);
+  });
+  test('blocks: swap changes the pick (never to the same one), a locked slot cannot be swapped / shuffled / picked', () => {
+    const b = HB.newBlock('core', 10, seqRng([0.3]));
+    const before = b.picks.slice();
+    eq(HB.reroll(b, 0, seqRng([0, 0.5, 0.99])), true); eq(b.picks[0] !== before[0], true);
+    for (let i = 0; i < 40; i++) { const p = b.picks[1]; HB.reroll(b, 1, Math.random); eq(b.picks[1] !== p, true); }
+    HB.toggleLock(b, 2); const locked = b.picks[2];
+    eq(HB.reroll(b, 2, Math.random), false); eq(HB.setPick(b, 2, 0), false);
+    HB.shuffleBlock(b, Math.random); eq(b.picks[2], locked);
+    eq(b.picks.length, 4); eq(b.locks, [false, false, true, false]);
+    HB.toggleLock(b, 2); eq(HB.setPick(b, 2, 1), true); eq(b.picks[2], 1);
+  });
+  test('blocks: the plan shows the picked exercises, logs under the majority category, and a 10-min block has 4 slots / 15-min 5', () => {
+    const b = HB.newBlock('push', 15, seqRng([0]));
+    const plan = HB.buildPlan({ blocks: [b] });
+    eq(plan.sections[0].items.length, 5);
+    eq(plan.sections[0].items[0].name, HB.theme('push').slots[0].options[0].name);
+    eq(HB.newBlock('push', 10, Math.random).picks.length, 4);
+    eq(HB.catOf({ blocks: [HB.newBlock('core', 10, Math.random), HB.newBlock('push', 15, Math.random)] }), 'str_up');   // 15 min > 10 min
+    eq(HB.catOf({ blocks: [HB.newBlock('mobility', 15, Math.random), HB.newBlock('core', 10, Math.random)] }), 'mob');
+    eq(HB.newBlock('nope', 10, Math.random), null); eq(HB.newBlock('core', 20, Math.random), null);
+  });
+  test('store: homeCustom round-trips, junk is cleaned, a save without it loads as null, a custom run needs its draft', () => {
+    const d = mk(15, 10); HB.toggleLock(d.blocks[0], 1);
+    const run = HW.newRun('custom', T0, SUN);
+    const loaded = Store.normalize({ v: 1, run: null, days: {}, homeCustom: JSON.parse(JSON.stringify(d)), homeRun: JSON.parse(JSON.stringify(run)) });
+    eq(loaded.homeCustom, d); eq(loaded.homeRun.planId, 'custom');
+    eq(Store.normalize({ v: 1, run: null, days: {} }).homeCustom, null);                   // previous release
+    eq(Store.normalize({ v: 1, run: null, days: {}, homeRun: run }).homeRun, null);        // custom run but no draft
+    const junk = Store.normalize({ v: 1, run: null, days: {}, homeCustom: { blocks: [{ theme: 'zzz', mins: 10 }, { theme: 'core', mins: 99 }, { theme: 'core', mins: 10, picks: [99, -1, 'x'], locks: [1, true] }] } });
+    eq(junk.homeCustom.blocks.length, 1); eq(junk.homeCustom.blocks[0].picks, [0, 0, 0, 0]); eq(junk.homeCustom.blocks[0].locks, [false, true, false, false]);
+    eq(D.newState().homeCustom, null);
   });
 
   // ---------- storage ----------

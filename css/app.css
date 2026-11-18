@@ -473,3 +473,16 @@ body.player-open { overflow: hidden; }
 
 .pl-sound { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
 .pl-sound .btn { flex: none; }
+
+/* custom block workout builder */
+.bl-block { margin-bottom: 12px; }
+.bl-btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.bl-slots { list-style: none; margin: 8px 0 0; padding: 0; }
+.bl-slot { border-top: 1px solid var(--line); padding: 10px 0; margin: 0; }
+.bl-slot small { color: var(--muted); font-weight: 700; display: block; margin-bottom: 4px; }
+.bl-slot select { min-height: 44px; font-size: 15px; }
+.bl-slot p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.bl-slot.locked select { opacity: .75; }
+.bl-add { display: grid; gap: 8px; margin: 12px 0; }
+.bl-status { color: var(--muted); font-size: 14px; }
+.bl-status.ok { color: var(--accent); font-weight: 800; }

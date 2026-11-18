@@ -4,7 +4,7 @@
 (function (root) {
   'use strict';
 
-  const HW = HomeWorkout, PLANS = HomePlans.PLANS;
+  const HW = HomeWorkout, PLANS = HomePlans.PLANS, TARGET_MIN = 45;
   const SOUND_KEY = '75hard:sound';
 
   const ui = {
@@ -17,7 +17,10 @@
   ui.loud = false;                                              // "sound even when the phone is on silent" (opt-in)
   try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
 
-  const planOf = (id) => PLANS.find((p) => p.id === id);
+  const HB = HomeBlocks;
+  const draftOf = (app) => app.state.homeCustom || (app.state.homeCustom = { blocks: [] });
+  // 'custom' = the user's own block workout, built from the draft stored in state.homeCustom
+  const planOf = (id) => id === HB.CUSTOM_ID ? HB.buildPlan(root.App && root.App.state.homeCustom) : PLANS.find((p) => p.id === id);
   const mmss = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
   const host = () => document.getElementById('player');
   const reduced = () => !!(root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -50,22 +53,41 @@
     return ui.ctx;
   }
   const setTestMsg = (text) => { const m = document.getElementById('plTestMsg'); if (m) m.textContent = text; };
+  // LOUD on purpose: phone speakers are weak below ~700 Hz, so the tones sit at 900-1800 Hz, a square wave carries
+  // far more energy than a sine, the gain is near full and a compressor + make-up gain evens the peaks out.
+  function master(c) {
+    if (ui.masterFor !== c) {
+      ui.masterFor = c; ui.master = c.destination;
+      try {
+        const comp = c.createDynamicsCompressor(), g = c.createGain();
+        comp.threshold.value = -30; comp.knee.value = 12; comp.ratio.value = 14; comp.attack.value = 0.002; comp.release.value = 0.12;
+        g.gain.value = 1.6;
+        comp.connect(g); g.connect(c.destination); ui.master = comp;
+      } catch (e) { ui.master = c.destination; }
+    }
+    return ui.master;
+  }
   function beep(freq, ms, vol, delayMs) {
     if (!ui.sound) return;
     stats.beeps.push(freq);
     const c = audio();
     if (!c) return;
     const t0 = c.currentTime + (delayMs || 0) / 1000, o = c.createOscillator(), g = c.createGain();
-    o.type = 'sine'; o.frequency.value = freq;
+    o.type = 'square'; o.frequency.value = freq;
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol || 0.4, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(vol || 0.9, t0 + 0.005);
+    g.gain.setValueAtTime(vol || 0.9, t0 + Math.max(0.006, ms / 1000 - 0.04));
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
-    o.connect(g); g.connect(c.destination);
+    o.connect(g); g.connect(master(c));
     o.start(t0); o.stop(t0 + ms / 1000 + 0.03);
   }
-  const playChange = (kind) => beep(kind === 'work' || kind === 'block' ? 880 : 520, 260, 0.45);
-  const playTick = () => beep(700, 90, 0.3);
-  const playDone = () => [660, 880, 1100].forEach((f, i) => beep(f, 220, 0.45, i * 240));
+  // a new exercise = double beep (high), a rest = one lower, longer beep
+  const playChange = (kind) => {
+    if (kind === 'work' || kind === 'block') { beep(1320, 140, 0.95); beep(1320, 140, 0.95, 190); }
+    else beep(990, 340, 0.95);
+  };
+  const playTick = () => beep(1100, 110, 0.9);
+  const playDone = () => [880, 1100, 1320, 1760].forEach((f, i) => beep(f, 260, 0.95, i * 230));
 
   // ---------- keep the screen awake (when the browser allows it) ----------
   async function lock() {
@@ -121,7 +143,41 @@
         ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
       </div>
       <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.</p>
+      ${plan.id === HB.CUSTOM_ID ? '<button class="btn big" data-act="blEdit">ערוך בלוקים</button>' : ''}
       <button class="btn primary big" data-act="plStart">התחל</button></div>`;
+  }
+
+  // ---------- the builder (custom workout) ----------
+  function buildHtml(app) {
+    const { esc } = app, d = draftOf(app), total = HB.totalMin(d);
+    const gap = TARGET_MIN - total;
+    const status = !d.blocks.length ? 'הוסיפו בלוקים של 10 או 15 דקות. לדוגמה 15+15+15 או 15+10+10+10 = 45.'
+      : gap === 0 ? 'בול 45 דקות ✓' : gap > 0 ? `חסרות ${gap} דקות ל-45` : `${-gap} דקות מעל 45`;
+    const blocks = d.blocks.map((b, bi) => {
+      const th = HB.theme(b.theme);
+      const rows = HB.slotsFor(b).map((s, si) => {
+        const opt = s.options[b.picks[si]], locked = b.locks[si];
+        return `<li class="bl-slot${locked ? ' locked' : ''}"><small>${esc(s.name)}</small>
+          <select data-change="blPick" data-b="${bi}" data-s="${si}" ${locked ? 'disabled' : ''} aria-label="${esc(s.name)}">${s.options.map((x, xi) => `<option value="${xi}"${xi === b.picks[si] ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+          ${opt.note ? `<p>${esc(opt.note)}</p>` : ''}
+          <div class="bl-btns"><button class="btn mini" data-act="blRoll" data-b="${bi}" data-s="${si}" ${locked ? 'disabled' : ''}>החלף</button>
+          <button class="btn mini${locked ? ' primary' : ''}" data-act="blLock" data-b="${bi}" data-s="${si}">${locked ? 'נעול · שחרר' : 'נעל'}</button></div></li>`;
+      }).join('');
+      return `<section class="pl-sec bl-block"><h3>בלוק ${bi + 1}: ${esc(th.name)} <small>${b.mins} דק׳</small></h3>
+        <div class="bl-btns"><button class="btn mini" data-act="blShuffle" data-b="${bi}">ערבב את הלא-נעולים</button><button class="btn mini" data-act="blRemove" data-b="${bi}">הסר בלוק</button></div>
+        <ul class="bl-slots">${rows}</ul></section>`;
+    }).join('');
+    const full = d.blocks.length >= HB.MAX_BLOCKS;
+    return `<div class="pl-wrap">
+      <div class="pl-top"><button class="pl-x" data-act="plClose" aria-label="סגירה">✕</button><h1>אימון מותאם</h1></div>
+      <p class="pl-note">בחרו בלוקים של 10 או 15 דקות, החליפו תרגילים, ונעלו את מה שמוצא חן בעיניכם. אחר כך זה אימון רגיל עם טיימר.</p>
+      <div class="pl-meta"><b>${total} דק׳</b> <span class="bl-status${gap === 0 && total ? ' ok' : ''}">${esc(status)}</span></div>
+      ${blocks}
+      <div class="bl-add"><select id="blTheme" aria-label="נושא הבלוק">${HB.THEMES.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>
+        <div class="bl-btns"><button class="btn" data-act="blAdd" data-mins="10" ${full ? 'disabled' : ''}>+ בלוק 10 דק׳</button>
+        <button class="btn" data-act="blAdd" data-mins="15" ${full ? 'disabled' : ''}>+ בלוק 15 דק׳</button></div></div>
+      ${d.blocks.length ? '<button class="btn" data-act="blShuffleAll">ערבב הכל (חוץ מהנעולים)</button>' : ''}
+      <button class="btn primary big" data-act="blDone" ${d.blocks.length ? '' : 'disabled'}>הכן אימון (${total} דק׳)</button></div>`;
   }
 
   function runHtml(app) {
@@ -175,7 +231,7 @@
     const h = host();
     if (!h) return;
     const top = h.scrollTop;
-    h.innerHTML = ui.view === 'run' ? runHtml(app) : ui.view === 'done' ? doneHtml(app) : overviewHtml(app);
+    h.innerHTML = ui.view === 'run' ? runHtml(app) : ui.view === 'done' ? doneHtml(app) : ui.view === 'build' ? buildHtml(app) : overviewHtml(app);
     h.scrollTop = top;      // keep the page exactly where it was: no auto-scroll to the plan list, the timer stays in view
   }
 
@@ -233,7 +289,7 @@
       ui.prevElapsed = pos.elapsedMs;
       ui.view = pos.done ? 'done' : 'run';
       if (ui.view === 'run') { ui.lastIndex = pos.index; startLoop(app); if (!HW.isPaused(run)) lock(); }
-    } else ui.view = 'overview';
+    } else ui.view = planId === HB.CUSTOM_ID ? 'build' : 'overview';
     render(app);
   }
 
@@ -248,8 +304,11 @@
   // ---------- entry points ----------
   // The list of plans, as a modal (used from Today) and as a card (Workouts tab).
   function planRows(app) {
+    const d = app.state.homeCustom, built = d && d.blocks.length;
     return PLANS.map((p) => `<button class="plan-row" data-act="plOpen" data-id="${p.id}">
-      <span class="pr-name">${app.esc(p.name)}</span><span class="pr-meta">${catChip(p.cat)} ${Math.round(HW.compile(p).totalMs / 60000)} דק׳</span></button>`).join('');
+      <span class="pr-name">${app.esc(p.name)}</span><span class="pr-meta">${catChip(p.cat)} ${Math.round(HW.compile(p).totalMs / 60000)} דק׳</span></button>`).join('')
+      + `<button class="plan-row" data-act="plOpen" data-id="${HB.CUSTOM_ID}"><span class="pr-name">אימון מותאם: בלוקים של 10/15 דק׳</span>
+      <span class="pr-meta">${built ? `${HB.totalMin(d)} דק׳ · ` : ''}בנו והחליפו</span></button>`;
   }
   function resumeBanner(app) {
     const run = app.state.homeRun, plan = run && planOf(run.planId);
@@ -313,7 +372,7 @@
       if (!ui.sound) { setTestMsg('הצליל כבוי. הפעילו אותו בכפתור "צליל" ונסו שוב.'); return; }
       const c = audio();
       if (!c) { setTestMsg('הדפדפן הזה לא תומך בצליל.'); return; }
-      [660, 880, 1100].forEach((f, i) => beep(f, 200, 0.5, i * 260));
+      [880, 1320, 1760].forEach((f, i) => beep(f, 220, 0.95, i * 280));
       setTimeout(() => setTestMsg(c.state === 'running'
         ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
         : `מנוע הצליל לא פעיל (מצב: ${c.state}). לחצו שוב על "בדיקת צליל".`), 500);
@@ -324,6 +383,28 @@
       applySession();
       render(app);
       setTestMsg(ui.loud ? 'גם במצב שקט: הצלילים יישמעו גם כשהטלפון על שקט, אבל ייתכן שהמוזיקה תושתק לרגע בכל צליל.' : 'הצלילים יתערבבו עם המוזיקה ויושתקו כשהטלפון על שקט.');
+    });
+    // ---- builder ----
+    const rng = () => Math.random();
+    const edit = (fn) => { fn(draftOf(app)); app.commit(); render(app); };
+    const blk = (d, el) => d.blocks[Number(el.dataset.b)];
+    app.act('blAdd', (el) => edit((d) => {
+      const sel = document.getElementById('blTheme');
+      if (d.blocks.length >= HB.MAX_BLOCKS) return;
+      const b = HB.newBlock(sel && sel.value, Number(el.dataset.mins), rng);
+      if (b) d.blocks.push(b);
+    }));
+    app.act('blRemove', (el) => edit((d) => { d.blocks.splice(Number(el.dataset.b), 1); }));
+    app.act('blRoll', (el) => edit((d) => { const b = blk(d, el); if (b) HB.reroll(b, Number(el.dataset.s), rng); }));
+    app.act('blLock', (el) => edit((d) => { const b = blk(d, el); if (b) HB.toggleLock(b, Number(el.dataset.s)); }));
+    app.act('blShuffle', (el) => edit((d) => { const b = blk(d, el); if (b) HB.shuffleBlock(b, rng); }));
+    app.act('blShuffleAll', () => edit((d) => HB.shuffleAll(d, rng)));
+    app.act('blPick', (el) => edit((d) => { const b = blk(d, el); if (b) HB.setPick(b, Number(el.dataset.s), Number(el.value)); }));
+    app.act('blEdit', () => { ui.view = 'build'; render(app); });
+    app.act('blDone', () => {
+      const d = draftOf(app); if (!d.blocks.length) return;
+      ui.planId = HB.CUSTOM_ID; ui.c = HW.compile(planOf(HB.CUSTOM_ID)); ui.view = 'overview'; render(app);
+      host().scrollTop = 0;
     });
     app.act('plLog', (el) => {
       const run = app.state.homeRun, plan = planOf(ui.planId); if (!run || !plan) return;

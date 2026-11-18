@@ -59,7 +59,9 @@
     out.pantryMissing = Array.isArray(s.pantryMissing) ? s.pantryMissing.filter((x) => typeof x === 'string') : [];
     // A home workout that was running when the app closed: keep it only if it is well-formed and its plan still exists.
     const hr = s.homeRun, HW = root.HomeWorkout, HP = root.HomePlans;
-    const planKnown = !HP || HP.PLANS.some((p) => hr && p.id === hr.planId);
+    out.homeCustom = root.HomeBlocks ? root.HomeBlocks.fix(s.homeCustom) : null;       // the "build your own" draft (null on older saves)
+    const customOk = !!(hr && hr.planId === 'custom' && out.homeCustom && out.homeCustom.blocks.length);
+    const planKnown = !HP || customOk || HP.PLANS.some((p) => hr && p.id === hr.planId);
     out.homeRun = HW && HW.validRun(hr) && planKnown ? Object.assign({ pausedAt: null, pausedMs: 0, skips: [], dayKey: null }, hr) : null;
     const hadNotes = Array.isArray(s.notesShown);
     out.notesShown = hadNotes ? s.notesShown : [];
