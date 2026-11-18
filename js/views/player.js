@@ -13,7 +13,9 @@
     ctx: null, wake: null, sound: true, flashTimer: 0
   };
   const stats = { beeps: [], flashes: 0, wakeRequests: 0 };      // for tests / debugging
-  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; } catch (e) { /* storage unavailable: keep the default */ }
+  const LOUD_KEY = '75hard:soundLoud';
+  ui.loud = false;                                              // "sound even when the phone is on silent" (opt-in)
+  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
 
   const planOf = (id) => PLANS.find((p) => p.id === id);
   const mmss = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
@@ -22,16 +24,32 @@
   const catChip = (cat) => `<span class="catchip cat-${cat}">${Training.BY.get(cat).short}</span>`;
 
   // ---------- sound (Web Audio; created from a tap) ----------
+  // iPhone: the silent switch mutes Web Audio, and when another app (Spotify...) takes the audio Safari puts the
+  // context in 'interrupted'. So: create it from a tap, start a source in that tap, and WAKE it whenever it is not
+  // 'running' - before every cue and on every tap inside the player.
+  function applySession() {                                     // Safari's Audio Session API, where it exists
+    try {
+      if (root.navigator.audioSession) root.navigator.audioSession.type = ui.loud ? 'playback' : 'ambient';   // ambient = mix with music, obey silent
+    } catch (e) { /* not supported */ }
+  }
+  function unlockBuffer(c) {                                    // some iOS versions only unlock once a source has started in the tap
+    try { const s = c.createBufferSource(); s.buffer = c.createBuffer(1, 1, 22050); s.connect(c.destination); s.start(0); } catch (e) { /* not supported */ }
+  }
   function audio() {
     if (!ui.sound) return null;
     if (!ui.ctx) {
       const AC = root.AudioContext || root.webkitAudioContext;
       if (!AC) return null;
+      applySession();
       try { ui.ctx = new AC(); } catch (e) { return null; }
+      unlockBuffer(ui.ctx);
     }
-    if (ui.ctx.state === 'suspended') ui.ctx.resume();
+    if (ui.ctx.state !== 'running') {                           // 'suspended' OR iOS 'interrupted'
+      try { const p = ui.ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* needs a tap */ }
+    }
     return ui.ctx;
   }
+  const setTestMsg = (text) => { const m = document.getElementById('plTestMsg'); if (m) m.textContent = text; };
   function beep(freq, ms, vol, delayMs) {
     if (!ui.sound) return;
     stats.beeps.push(freq);
@@ -96,7 +114,13 @@
       <p class="pl-note">${esc(plan.note || '')}</p>
       <div class="pl-meta"><b>${Math.round(c.totalMs / 60000)} דק׳</b> ${catChip(plan.cat)}</div>
       <div class="pl-sections">${sectionsHtml(app, c, null)}</div>
-      <p class="pl-tip">${esc(tip)} הצלילים נשמעים כשהמסך דלוק והטלפון לא על שקט.</p>
+      <p class="pl-tip">${esc(tip)}</p>
+      <div class="pl-sound">
+        <button class="btn mini" data-act="plTest">בדיקת צליל</button>
+        <button class="btn mini" data-act="plSound">${ui.sound ? 'צליל: פועל' : 'צליל: כבוי'}</button>
+        ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
+      </div>
+      <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.</p>
       <button class="btn primary big" data-act="plStart">התחל</button></div>`;
   }
 
@@ -150,9 +174,9 @@
   function render(app) {
     const h = host();
     if (!h) return;
+    const top = h.scrollTop;
     h.innerHTML = ui.view === 'run' ? runHtml(app) : ui.view === 'done' ? doneHtml(app) : overviewHtml(app);
-    const cur = h.querySelector('.pl-list .cur');
-    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+    h.scrollTop = top;      // keep the page exactly where it was: no auto-scroll to the plan list, the timer stays in view
   }
 
   // ---------- the loop ----------
@@ -285,6 +309,22 @@
       if (ui.sound) { audio(); beep(660, 120, 0.3); }
       render(app);
     });
+    app.act('plTest', () => {
+      if (!ui.sound) { setTestMsg('הצליל כבוי. הפעילו אותו בכפתור "צליל" ונסו שוב.'); return; }
+      const c = audio();
+      if (!c) { setTestMsg('הדפדפן הזה לא תומך בצליל.'); return; }
+      [660, 880, 1100].forEach((f, i) => beep(f, 200, 0.5, i * 260));
+      setTimeout(() => setTestMsg(c.state === 'running'
+        ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
+        : `מנוע הצליל לא פעיל (מצב: ${c.state}). לחצו שוב על "בדיקת צליל".`), 500);
+    });
+    app.act('plLoud', () => {
+      ui.loud = !ui.loud;
+      try { root.localStorage.setItem(LOUD_KEY, ui.loud ? '1' : '0'); } catch (e) { /* not saved, still works now */ }
+      applySession();
+      render(app);
+      setTestMsg(ui.loud ? 'גם במצב שקט: הצלילים יישמעו גם כשהטלפון על שקט, אבל ייתכן שהמוזיקה תושתק לרגע בכל צליל.' : 'הצלילים יתערבבו עם המוזיקה ויושתקו כשהטלפון על שקט.');
+    });
     app.act('plLog', (el) => {
       const run = app.state.homeRun, plan = planOf(ui.planId); if (!run || !plan) return;
       const ok = HW.logWorkout(app.state, app.status().today, app.now(), el.dataset.id, plan, ui.c, run);
@@ -295,7 +335,12 @@
     app.act('plDiscard', () => { app.state.homeRun = null; app.commit(); close(app); app.render(); });
 
     // coming back to the app mid-workout: re-take the screen lock and catch the clock up at once
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && running(app) && !HW.isPaused(app.state.homeRun)) { lock(); frame(app); } });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && ui.view) audio();                                  // wake the sound after another app had it
+      if (!document.hidden && running(app) && !HW.isPaused(app.state.homeRun)) { lock(); frame(app); }
+    });
+    // any tap inside the player re-wakes the sound (a tap is the only time iOS lets it restart)
+    document.addEventListener('pointerdown', (e) => { if (ui.view && e.target.closest && e.target.closest('#player')) audio(); }, true);
   }
 
   root.Views = root.Views || {};

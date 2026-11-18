@@ -470,3 +470,6 @@ body.player-open { overflow: hidden; }
 .plan-row:hover, .plan-row:focus-visible { border-color: var(--accent); }
 .pr-name { font-weight: 800; font-size: 16px; }
 .pr-meta { color: var(--muted); font-size: 14px; white-space: nowrap; display: inline-flex; gap: 8px; align-items: center; }
+
+.pl-sound { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.pl-sound .btn { flex: none; }
