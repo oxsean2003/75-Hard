@@ -13,9 +13,10 @@
     ctx: null, wake: null, sound: true, flashTimer: 0
   };
   const stats = { beeps: [], flashes: 0, wakeRequests: 0 };      // for tests / debugging
-  const LOUD_KEY = '75hard:soundLoud';
+  const LOUD_KEY = '75hard:soundLoud', ALT_KEY = '75hard:soundAlt';
+  ui.alt = false;                                               // opt-in: the <audio> fallback (it takes the audio away from Spotify)
   ui.loud = false;                                              // "sound even when the phone is on silent" (opt-in)
-  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
+  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; ui.alt = root.localStorage.getItem(ALT_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
 
   const HB = HomeBlocks;
   const draftOf = (app) => app.state.homeCustom || (app.state.homeCustom = { blocks: [] });
@@ -46,7 +47,7 @@
       applySession();
       try { ui.ctx = new AC(); } catch (e) { return null; }
       unlockBuffer(ui.ctx);
-      unlockElement();
+      if (ui.alt) unlockElement();
     }
     if (ui.ctx.state !== 'running') {                           // 'suspended' OR iOS 'interrupted'
       try { const p = ui.ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* needs a tap */ }
@@ -113,7 +114,7 @@
     data.forEach((s, i) => v.setInt16(44 + i * 2, s, true));
     return (ui.wavs[name] = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
   }
-  function unlockElement() {                                    // inside a tap
+  function unlockElement() {                                    // inside a tap; only when the user switched the fallback on
     try {
       if (ui.el || !root.Audio) return;
       ui.el = new root.Audio();
@@ -196,6 +197,7 @@
       <div class="pl-sound">
         <button class="btn mini" data-act="plTest">בדיקת צליל</button>
         <button class="btn mini" data-act="plSound">${ui.sound ? 'צליל: פועל' : 'צליל: כבוי'}</button>
+        <button class="btn mini" data-act="plAlt">${ui.alt ? 'ספוטיפיי: נגן חלופי פועל' : 'ספוטיפיי: נגן חלופי כבוי'}</button>
         ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
       </div>
       <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.</p>
@@ -434,8 +436,17 @@
         play('test');
         setTestMsg(running
           ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
-          : `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הצליל מנוגן דרך נגן חלופי. אם לא שמעתם, ודאו שהטלפון לא על שקט.`);
+          : (ui.alt ? `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הצליל מנוגן דרך נגן חלופי.` : `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הפעילו את הכפתור נגן חלופי כדי שהצפצופים ינוגנו בכל זאת (עלול לעצור את המוזיקה).`));
       }, 250);
+    });
+    app.act('plAlt', () => {                                       // a tap: the one place the element can be unlocked
+      ui.alt = !ui.alt;
+      try { root.localStorage.setItem(ALT_KEY, ui.alt ? '1' : '0'); } catch (e) { /* not saved, still works now */ }
+      if (ui.alt) unlockElement();
+      render(app);
+      setTestMsg(ui.alt
+        ? 'נגן חלופי פועל: אם ספוטיפיי תופס את הצליל, הצפצופים יתנגנו דרך נגן רגיל. שימו לב: זה עלול לעצור את המוזיקה. הפעילו אותה שוב אחרי שלחצתם התחל.'
+        : 'נגן חלופי כבוי: הצפצופים מתערבבים עם המוזיקה ולא עוצרים אותה, אבל ייתכן שיושתקו כשספוטיפיי תופס את הצליל.');
     });
     app.act('plLoud', () => {
       ui.loud = !ui.loud;
