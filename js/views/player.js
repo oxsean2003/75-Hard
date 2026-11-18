@@ -46,6 +46,7 @@
       applySession();
       try { ui.ctx = new AC(); } catch (e) { return null; }
       unlockBuffer(ui.ctx);
+      unlockElement();
     }
     if (ui.ctx.state !== 'running') {                           // 'suspended' OR iOS 'interrupted'
       try { const p = ui.ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* needs a tap */ }
@@ -67,11 +68,7 @@
     }
     return ui.master;
   }
-  function beep(freq, ms, vol, delayMs) {
-    if (!ui.sound) return;
-    stats.beeps.push(freq);
-    const c = audio();
-    if (!c) return;
+  function beepNow(c, freq, ms, vol, delayMs) {
     const t0 = c.currentTime + (delayMs || 0) / 1000, o = c.createOscillator(), g = c.createGain();
     o.type = 'square'; o.frequency.value = freq;
     g.gain.setValueAtTime(0.0001, t0);
@@ -81,13 +78,72 @@
     o.connect(g); g.connect(master(c));
     o.start(t0); o.stop(t0 + ms / 1000 + 0.03);
   }
-  // a new exercise = double beep (high), a rest = one lower, longer beep
-  const playChange = (kind) => {
-    if (kind === 'work' || kind === 'block') { beep(1320, 140, 0.95); beep(1320, 140, 0.95, 190); }
-    else beep(990, 340, 0.95);
+  // Every cue is a list of [freq, ms, delayMs]. A new exercise = double beep (high), a rest = one lower, longer beep.
+  const CUES = {
+    work: [[1320, 140, 0], [1320, 140, 190]],
+    rest: [[990, 340, 0]],
+    tick: [[1100, 110, 0]],
+    done: [[880, 260, 0], [1100, 260, 230], [1320, 260, 460], [1760, 260, 690]],
+    test: [[880, 220, 0], [1320, 220, 280], [1760, 220, 560]]
   };
-  const playTick = () => beep(1100, 110, 0.9);
-  const playDone = () => [880, 1100, 1320, 1760].forEach((f, i) => beep(f, 260, 0.95, i * 230));
+
+  // SPOTIFY FIX. When another app takes the audio, iOS puts the Web Audio context in 'interrupted' and only a TAP can
+  // restart it - but nobody taps during a workout. So when the context is not running at cue time, the cue is played
+  // through an ordinary <audio> element instead: one element is created and "unlocked" in the Start tap, and iOS lets
+  // an unlocked element play later from a timer. The cue is rendered to a tiny WAV (same tones). With the Audio
+  // Session API the session is set to 'transient' for it (a short sound over the music) when available.
+  function wavUrl(name) {
+    ui.wavs = ui.wavs || {};
+    if (ui.wavs[name]) return ui.wavs[name];
+    const RATE = 22050, notes = CUES[name] || [];
+    const total = notes.reduce((m, n) => Math.max(m, n[2] + n[1]), 0) + 60;
+    const data = new Int16Array(Math.ceil(RATE * total / 1000));
+    notes.forEach(([f, ms, delay]) => {
+      const start = Math.floor(RATE * delay / 1000), len = Math.floor(RATE * ms / 1000);
+      for (let i = 0; i < len; i++) {
+        const env = Math.min(1, i / (RATE * 0.005), (len - i) / (RATE * 0.04));          // short fade in / out: no clicks
+        data[start + i] += (Math.sin(2 * Math.PI * f * i / RATE) >= 0 ? 1 : -1) * 0.8 * Math.max(0, env) * 32767;
+      }
+    });
+    const buf = new ArrayBuffer(44 + data.length * 2), v = new DataView(buf);
+    const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + data.length * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, data.length * 2, true);
+    data.forEach((s, i) => v.setInt16(44 + i * 2, s, true));
+    return (ui.wavs[name] = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+  }
+  function unlockElement() {                                    // inside a tap
+    try {
+      if (ui.el || !root.Audio) return;
+      ui.el = new root.Audio();
+      ui.el.setAttribute('playsinline', '');
+      ui.el.src = wavUrl('tick'); ui.el.volume = 0;
+      const p = ui.el.play(); if (p && p.catch) p.catch(() => {});
+      setTimeout(() => { if (ui.el) ui.el.volume = 1; }, 400);
+    } catch (e) { ui.el = null; }
+  }
+  function fallbackCue(name) {
+    stats.fallbacks = (stats.fallbacks || 0) + 1;
+    try {
+      if (!ui.el) return;
+      if (root.navigator.audioSession && !ui.loud) root.navigator.audioSession.type = 'transient';
+      ui.el.src = wavUrl(name); ui.el.volume = 1;
+      const p = ui.el.play(); if (p && p.catch) p.catch(() => {});
+    } catch (e) { /* nothing more to try */ }
+  }
+  function play(name) {
+    if (!ui.sound) return;
+    const notes = CUES[name]; if (!notes) return;
+    notes.forEach((n) => stats.beeps.push(n[0]));
+    const c = audio();
+    const justTapped = Date.now() - (ui.tapAt || 0) < 1500;      // a tap is waking the engine right now: it will be running in a moment
+    if (c && (c.state === 'running' || (c.state === 'suspended' && justTapped))) notes.forEach((n) => beepNow(c, n[0], n[1], 0.95, n[2]));
+    else fallbackCue(name);
+  }
+  const playChange = (kind) => play(kind === 'work' || kind === 'block' ? 'work' : 'rest');
+  const playTick = () => play('tick');
+  const playDone = () => play('done');
 
   // ---------- keep the screen awake (when the browser allows it) ----------
   async function lock() {
@@ -365,17 +421,21 @@
     app.act('plSound', () => {
       ui.sound = !ui.sound;
       try { root.localStorage.setItem(SOUND_KEY, ui.sound ? '1' : '0'); } catch (e) { /* not saved, still works now */ }
-      if (ui.sound) { audio(); beep(660, 120, 0.3); }
+      if (ui.sound) play('tick');
       render(app);
     });
     app.act('plTest', () => {
       if (!ui.sound) { setTestMsg('הצליל כבוי. הפעילו אותו בכפתור "צליל" ונסו שוב.'); return; }
       const c = audio();
       if (!c) { setTestMsg('הדפדפן הזה לא תומך בצליל.'); return; }
-      [880, 1320, 1760].forEach((f, i) => beep(f, 220, 0.95, i * 280));
-      setTimeout(() => setTestMsg(c.state === 'running'
-        ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
-        : `מנוע הצליל לא פעיל (מצב: ${c.state}). לחצו שוב על "בדיקת צליל".`), 500);
+      // give a suspended engine a moment to wake from this tap, then play (engine if running, else the <audio> fallback)
+      setTimeout(() => {
+        const running = c.state === 'running';
+        play('test');
+        setTestMsg(running
+          ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
+          : `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הצליל מנוגן דרך נגן חלופי. אם לא שמעתם, ודאו שהטלפון לא על שקט.`);
+      }, 250);
     });
     app.act('plLoud', () => {
       ui.loud = !ui.loud;
@@ -421,7 +481,7 @@
       if (!document.hidden && running(app) && !HW.isPaused(app.state.homeRun)) { lock(); frame(app); }
     });
     // any tap inside the player re-wakes the sound (a tap is the only time iOS lets it restart)
-    document.addEventListener('pointerdown', (e) => { if (ui.view && e.target.closest && e.target.closest('#player')) audio(); }, true);
+    document.addEventListener('pointerdown', (e) => { if (ui.view && e.target.closest && e.target.closest('#player')) { ui.tapAt = Date.now(); audio(); } }, true);
   }
 
   root.Views = root.Views || {};
