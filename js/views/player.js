@@ -13,10 +13,11 @@
     ctx: null, wake: null, sound: true, flashTimer: 0
   };
   const stats = { beeps: [], flashes: 0, wakeRequests: 0 };      // for tests / debugging
-  const LOUD_KEY = '75hard:soundLoud', ALT_KEY = '75hard:soundAlt';
+  const LOUD_KEY = '75hard:soundLoud', ALT_KEY = '75hard:soundAlt', MUSIC_KEY = '75hard:musicMode';
+  ui.music = 'duck';                                            // what the beeps do to the user's music: duck | pause | mix
   ui.alt = false;                                               // opt-in: the <audio> fallback (it takes the audio away from Spotify)
   ui.loud = false;                                              // "sound even when the phone is on silent" (opt-in)
-  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; ui.alt = root.localStorage.getItem(ALT_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
+  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; ui.alt = root.localStorage.getItem(ALT_KEY) === '1'; const mm = root.localStorage.getItem(MUSIC_KEY); if (mm === 'duck' || mm === 'pause' || mm === 'mix') ui.music = mm; } catch (e) { /* storage unavailable: keep the defaults */ }
 
   const HB = HomeBlocks;
   const draftOf = (app) => app.state.homeCustom || (app.state.homeCustom = { blocks: [] });
@@ -33,7 +34,9 @@
   // 'running' - before every cue and on every tap inside the player.
   function applySession() {                                     // Safari's Audio Session API, where it exists
     try {
-      if (root.navigator.audioSession) root.navigator.audioSession.type = ui.loud ? 'playback' : 'ambient';   // ambient = mix with music, obey silent
+      // 'transient' = a short sound that DUCKS other audio and lets it come back; 'transient-solo' = pauses the other audio
+      // for the beep and lets it resume; 'ambient' = just mix; 'playback' = also ignore the silent switch (may pause music)
+      if (root.navigator.audioSession) root.navigator.audioSession.type = ui.loud ? 'playback' : ui.music === 'duck' ? 'transient' : ui.music === 'pause' ? 'transient-solo' : 'ambient';
     } catch (e) { /* not supported */ }
   }
   function unlockBuffer(c) {                                    // some iOS versions only unlock once a source has started in the tap
@@ -136,6 +139,7 @@
   function play(name) {
     if (!ui.sound) return;
     const notes = CUES[name]; if (!notes) return;
+    applySession();                                              // set the music behaviour right before the beep
     notes.forEach((n) => stats.beeps.push(n[0]));
     const c = audio();
     const justTapped = Date.now() - (ui.tapAt || 0) < 1500;      // a tap is waking the engine right now: it will be running in a moment
@@ -197,6 +201,7 @@
       <div class="pl-sound">
         <button class="btn mini" data-act="plTest">בדיקת צליל</button>
         <button class="btn mini" data-act="plSound">${ui.sound ? 'צליל: פועל' : 'צליל: כבוי'}</button>
+        ${root.navigator.audioSession ? `<button class="btn mini" data-act="plMusic">${ui.music === 'duck' ? 'מוזיקה: מונמכת בצפצוף' : ui.music === 'pause' ? 'מוזיקה: נעצרת בצפצוף' : 'מוזיקה: ללא שינוי'}</button>` : ''}
         <button class="btn mini" data-act="plAlt">${ui.alt ? 'ספוטיפיי: נגן חלופי פועל' : 'ספוטיפיי: נגן חלופי כבוי'}</button>
         ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
       </div>
@@ -438,6 +443,13 @@
           ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
           : (ui.alt ? `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הצליל מנוגן דרך נגן חלופי.` : `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הפעילו את הכפתור נגן חלופי כדי שהצפצופים ינוגנו בכל זאת (עלול לעצור את המוזיקה).`));
       }, 250);
+    });
+    app.act('plMusic', () => {
+      ui.music = ui.music === 'duck' ? 'pause' : ui.music === 'pause' ? 'mix' : 'duck';
+      try { root.localStorage.setItem(MUSIC_KEY, ui.music); } catch (e) { /* not saved, still works now */ }
+      applySession(); render(app);
+      setTestMsg(ui.music === 'duck' ? 'המוזיקה תונמך בזמן הצפצוף ותחזור אחריו. לחצו בדיקת צליל כדי לשמוע.'
+        : ui.music === 'pause' ? 'המוזיקה תיעצר בזמן הצפצוף ותמשיך אחריו (אם האפליקציה שלה מחדשת לבד).' : 'הצפצופים מתערבבים עם המוזיקה בלי לשנות אותה.');
     });
     app.act('plAlt', () => {                                       // a tap: the one place the element can be unlocked
       ui.alt = !ui.alt;
