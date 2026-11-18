@@ -14,10 +14,10 @@
   };
   const stats = { beeps: [], flashes: 0, wakeRequests: 0 };      // for tests / debugging
   const LOUD_KEY = '75hard:soundLoud', ALT_KEY = '75hard:soundAlt', MUSIC_KEY = '75hard:musicMode';
-  ui.music = 'duck';                                            // what the beeps do to the user's music: duck | pause | mix
+  ui.music = 'mix';                                             // FIXED: duck / pause / release-after-cue were tried on a real iPhone and all stopped Spotify for good (see CLAUDE.md round 15)
   ui.alt = false;                                               // opt-in: the <audio> fallback (it takes the audio away from Spotify)
   ui.loud = false;                                              // "sound even when the phone is on silent" (opt-in)
-  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; ui.alt = root.localStorage.getItem(ALT_KEY) === '1'; const mm = root.localStorage.getItem(MUSIC_KEY); if (mm === 'duck' || mm === 'pause' || mm === 'mix') ui.music = mm; } catch (e) { /* storage unavailable: keep the defaults */ }
+  try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
 
   const HB = HomeBlocks;
   const draftOf = (app) => app.state.homeCustom || (app.state.homeCustom = { blocks: [] });
@@ -215,11 +215,9 @@
       <div class="pl-sound">
         <button class="btn mini" data-act="plTest">בדיקת צליל</button>
         <button class="btn mini" data-act="plSound">${ui.sound ? 'צליל: פועל' : 'צליל: כבוי'}</button>
-        ${root.navigator.audioSession ? `<button class="btn mini" data-act="plMusic">${ui.music === 'duck' ? 'מוזיקה: מונמכת בצפצוף' : ui.music === 'pause' ? 'מוזיקה: נעצרת בצפצוף' : 'מוזיקה: ללא שינוי'}</button>` : ''}
-        <button class="btn mini" data-act="plAlt">${ui.alt ? 'ספוטיפיי: נגן חלופי פועל' : 'ספוטיפיי: נגן חלופי כבוי'}</button>
         ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
       </div>
-      <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.</p>
+      <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה. כשמוזיקה (ספוטיפיי) מנגנת ברקע, ייתכן שלא תשמעו צפצופים: ההבהוב והטיימר עדיין עובדים.</p>
       ${plan.id === HB.CUSTOM_ID ? '<button class="btn big" data-act="blEdit">ערוך בלוקים</button>' : ''}
       <button class="btn primary big" data-act="plStart">התחל</button></div>`;
   }
@@ -455,7 +453,7 @@
         play('test');
         setTestMsg(running
           ? 'מנוע הצליל פעיל. לא שמעתם? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה.'
-          : (ui.alt ? `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הצליל מנוגן דרך נגן חלופי.` : `אפליקציה אחרת (ספוטיפיי?) תפסה את הצליל (מצב המנוע: ${c.state}). הפעילו את הכפתור נגן חלופי כדי שהצפצופים ינוגנו בכל זאת (עלול לעצור את המוזיקה).`));
+          : `מנוע הצליל לא פעיל (מצב: ${c.state}). ייתכן שאפליקציה אחרת (ספוטיפיי?) תפסה את הצליל. אז יהיה רק הבהוב, בלי צפצופים.`);
       }, 250);
     });
     app.act('plMusic', () => {
