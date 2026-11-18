@@ -107,8 +107,9 @@
     seek(run, now, target);
     return true;
   }
-  // Minutes a FINISHED plan logs as: the planned time minus anything skipped (pauses don't reduce it).
-  const creditedMin = (c, run) => Math.floor(Math.max(0, c.totalMs - skippedMs(run)) / 60000);
+  // Minutes a FINISHED plan logs as: the planned time minus anything skipped (pauses don't reduce it), rounded to the
+  // NEAREST minute - flooring made a plan with a few skipped seconds (a skip tapped near the end of a rest) log 44.
+  const creditedMin = (c, run) => Math.round(Math.max(0, c.totalMs - skippedMs(run)) / 60000);
 
   // ---------- cues ----------
   // What is due between two elapsed times. Crossing a segment boundary -> ONE 'change' (the segment we are in now),

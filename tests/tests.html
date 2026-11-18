@@ -1004,7 +1004,8 @@
     eq(HW.skip(C1, r, T0 + 30000), true);                                                  // 30 s into segment 0 (60 s)
     eq(HW.positionAt(C1, HW.elapsed(r, T0 + 30000)), HW.positionAt(C1, 60000));
     eq(HW.skippedMs(r), 30000);
-    eq(HW.creditedMin(C1, r), 44);                                                         // 45:00 - 0:30 -> 44 whole minutes
+    eq(HW.creditedMin(C1, r), 45);                                                         // 45:00 - 0:30 = 44:30 -> rounds to 45 (a few skipped seconds don't cost the day)
+    eq(HW.creditedMin(C1, { skips: [[0, 91000]] }), 43);                                   // 45:00 - 1:31 = 43:29 -> 43
     HW.pause(r, T0 + 31000);
     HW.skip(C1, r, T0 + 99000);                                                            // paused: time passing does not matter
     eq(HW.positionAt(C1, HW.elapsed(r, T0 + 99000)).index, 2);
