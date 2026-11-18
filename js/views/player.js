@@ -143,8 +143,22 @@
     notes.forEach((n) => stats.beeps.push(n[0]));
     const c = audio();
     const justTapped = Date.now() - (ui.tapAt || 0) < 1500;      // a tap is waking the engine right now: it will be running in a moment
-    if (c && (c.state === 'running' || (c.state === 'suspended' && justTapped))) notes.forEach((n) => beepNow(c, n[0], n[1], 0.95, n[2]));
-    else fallbackCue(name);
+    const go = () => {
+      notes.forEach((n) => beepNow(c, n[0], n[1], 0.95, n[2]));
+      // RELEASE the audio hardware shortly after the cue: an idle-but-running context keeps the iPhone's audio session
+      // active, so the music app never gets the audio back. (Not in 'mix' mode: nothing to give back there.)
+      clearTimeout(ui.releaseT);
+      if (ui.music !== 'mix') {
+        const end = notes.reduce((m, n) => Math.max(m, n[2] + n[1]), 0);
+        ui.releaseT = setTimeout(() => { try { if (ui.ctx === c && c.state === 'running') { ui.released = true; c.suspend(); } } catch (e) { /* ignore */ } }, end + 300);
+      }
+    };
+    if (!c) fallbackCue(name);
+    else if (c.state === 'running') go();
+    else if (c.state === 'suspended' && (justTapped || ui.released)) {     // woken by a tap, or released by us after the last cue
+      ui.released = false;
+      Promise.resolve(c.resume()).then(() => { if (c.state === 'running') go(); else fallbackCue(name); }).catch(() => fallbackCue(name));
+    } else fallbackCue(name);
   }
   const playChange = (kind) => play(kind === 'work' || kind === 'block' ? 'work' : 'rest');
   const playTick = () => play('tick');
@@ -500,11 +514,11 @@
 
     // coming back to the app mid-workout: re-take the screen lock and catch the clock up at once
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && ui.view) audio();                                  // wake the sound after another app had it
+      if (!document.hidden && ui.view && !ui.released) audio();                                  // wake the sound after another app had it
       if (!document.hidden && running(app) && !HW.isPaused(app.state.homeRun)) { lock(); frame(app); }
     });
     // any tap inside the player re-wakes the sound (a tap is the only time iOS lets it restart)
-    document.addEventListener('pointerdown', (e) => { if (ui.view && e.target.closest && e.target.closest('#player')) { ui.tapAt = Date.now(); audio(); } }, true);
+    document.addEventListener('pointerdown', (e) => { if (ui.view && e.target.closest && e.target.closest('#player')) { ui.tapAt = Date.now(); if (!ui.released) audio(); } }, true);      // a released engine stays released: waking it would grab the audio from the music app
   }
 
   root.Views = root.Views || {};
