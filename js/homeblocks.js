@@ -10,11 +10,12 @@
   const CUSTOM_ID = 'custom';
 
   const theme = (id) => THEMES.find((t) => t.id === id) || null;
+  const allows = (th, mins) => !!th && !!TIMING[mins] && (th.mins || [10, 15]).includes(Number(mins));
   const slotsFor = (block) => theme(block.theme).slots.slice(0, TIMING[block.mins].slots);
   const pickIndex = (n, rng) => Math.min(n - 1, Math.floor(rng() * n));
 
   function newBlock(themeId, mins, rng) {
-    if (!theme(themeId) || !TIMING[mins]) return null;
+    if (!allows(theme(themeId), mins)) return null;
     const b = { theme: themeId, mins: Number(mins), picks: [], locks: [] };
     slotsFor(b).forEach((s) => { b.picks.push(pickIndex(s.options.length, rng)); b.locks.push(false); });
     return b;
@@ -48,7 +49,8 @@
   // The weekly-quota category a finished custom workout is logged under: the one with the most minutes (ties: first block's).
   function catOf(draft) {
     const tally = new Map();
-    draft.blocks.forEach((b) => { const c = theme(b.theme).cat; tally.set(c, (tally.get(c) || 0) + b.mins); });
+    const mains = draft.blocks.filter((b) => theme(b.theme).role === 'main');
+    (mains.length ? mains : draft.blocks).forEach((b) => { const c = theme(b.theme).cat; tally.set(c, (tally.get(c) || 0) + b.mins); });
     let best = null, bestMin = -1;
     tally.forEach((m, c) => { if (m > bestMin) { best = c; bestMin = m; } });
     return best;
@@ -81,7 +83,7 @@
     if (!d || typeof d !== 'object' || !Array.isArray(d.blocks)) return null;
     const blocks = [];
     d.blocks.slice(0, MAX_BLOCKS).forEach((b) => {
-      if (!b || !theme(b.theme) || !TIMING[b.mins]) return;
+      if (!b || !allows(theme(b.theme), b.mins)) return;
       const out = { theme: b.theme, mins: Number(b.mins), picks: [], locks: [] };
       slotsFor(out).forEach((s, i) => {
         const p = Array.isArray(b.picks) ? b.picks[i] : 0;
@@ -93,5 +95,43 @@
     return { blocks };
   }
 
-  root.HomeBlocks = { TIMING, THEMES, MAX_BLOCKS, TARGET_MIN, CUSTOM_ID, theme, slotsFor, newBlock, reroll, shuffleBlock, shuffleAll, setPick, toggleLock, totalMin, catOf, buildPlan, fix };
+  // ---------- the suggestion ----------
+  // A 45-minute workout in the order the research favours (see the "why" text in the builder):
+  //   warm-up 10  ->  main A 15 (the priority, done while fresh)  ->  main B 10 (different muscles, core last)  ->  easy finish 10.
+  // preferCat: the weekly-quota category this slot should serve ('str_up' -> push/pull lead, 'str_low' -> legs lead).
+  // avoid: theme ids to not lead with again (e.g. last time's), when there is an alternative.
+  const pick = (arr, rng) => arr[pickIndex(arr.length, rng)];
+  function suggest(rng, opts) {
+    const o = opts || {};
+    let leads = ['push', 'pull', 'legs'];
+    if (o.preferCat === 'str_up') leads = ['push', 'pull'];
+    else if (o.preferCat === 'str_low') leads = ['legs'];
+    const fresh = leads.filter((t) => !(o.avoid || []).includes(t));
+    const a = pick(fresh.length ? fresh : leads, rng);
+    const seconds = { push: ['pull', 'core'], pull: ['push', 'core'], legs: ['push', 'pull', 'core'] }[a];
+    const b = pick(seconds, rng);
+    return { blocks: [['warmup', 10], [a, 15], [b, 10], ['cooldown', 10]].map(([t, m]) => newBlock(t, m, rng)) };
+  }
+
+  // Plain-language hints about a draft's order (empty = it follows the recommended shape). Pure.
+  function advice(draft) {
+    const bl = (draft && draft.blocks) || [], out = [];
+    if (!bl.length) return out;
+    const th = bl.map((b) => theme(b.theme));
+    if (th[0].role !== 'warmup') out.push('אין חימום בהתחלה: כדאי להתחיל בבלוק חימום.');
+    const last = th[th.length - 1];
+    if (last.role !== 'cooldown' && last.group !== 'recovery') out.push('האימון לא מסתיים בבלוק קליל: כדאי לסיים בסיום קליל או במוביליטי.');
+    for (let i = 1; i < th.length; i++) {
+      if (th[i].role === 'main' && th[i - 1].role === 'main' && th[i].group === th[i - 1].group) out.push('שני בלוקים ברצף על אותה קבוצת שרירים: עדיף להחליף (דחיפה/משיכה, גוף עליון/תחתון).');
+    }
+    const coreAt = th.findIndex((t) => t.group === 'core');
+    if (coreAt >= 0 && th.some((t, i) => i > coreAt && ['push', 'pull', 'lower'].includes(t.group))) out.push('בלוק ליבה לפני בלוק כוח: עדיף ליבה אחרי הכוח, כדי לא לעייף את המייצבים.');
+    if (th.some((t, i) => t.role === 'cooldown' && i < th.length - 1)) out.push('בלוק סיום קליל באמצע האימון: מקומו בסוף.');
+    if (th.some((t, i) => t.role === 'warmup' && i > 0)) out.push('בלוק חימום לא בהתחלה: מקומו בראש האימון.');
+    const total = totalMin(draft);
+    if (total !== TARGET_MIN) out.push(total < TARGET_MIN ? `חסרות ${TARGET_MIN - total} דקות ל-45.` : `${total - TARGET_MIN} דקות מעל 45.`);
+    return out;
+  }
+
+  root.HomeBlocks = { suggest, advice, allows, TIMING, THEMES, MAX_BLOCKS, TARGET_MIN, CUSTOM_ID, theme, slotsFor, newBlock, reroll, shuffleBlock, shuffleAll, setPick, toggleLock, totalMin, catOf, buildPlan, fix };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -1122,9 +1122,11 @@
   const mk = (...mins) => ({ blocks: mins.map((m, i) => HB.newBlock(HB.THEMES[i % HB.THEMES.length].id, m, seqRng([0.1, 0.5, 0.9]))) });
   test('blocks: every theme has enough slots/options, and every 10/15 block compiles to exactly 10:00 / 15:00', () => {
     HB.THEMES.forEach((th) => {
-      eq(th.slots.length >= 5, true, th.id + ' has 5 slots');
+      const lens = th.mins || [10, 15];
+      eq(th.slots.length >= (lens.includes(15) ? 5 : 4), true, th.id + ' has enough slots');
+      eq(['warmup', 'main', 'cooldown'].includes(th.role), true, th.id + ' has a role'); eq(typeof th.group, 'string');
       th.slots.forEach((s) => eq(s.options.length >= 4, true, th.id + '/' + s.name + ' has options'));
-      [10, 15].forEach((m) => {
+      lens.forEach((m) => {
         const c = HW.compile(HB.buildPlan({ blocks: [HB.newBlock(th.id, m, Math.random)] }));
         eq(c.totalMs, m * 60000, th.id + ' ' + m);
       });
@@ -1154,7 +1156,35 @@
     eq(HB.newBlock('push', 10, Math.random).picks.length, 4);
     eq(HB.catOf({ blocks: [HB.newBlock('core', 10, Math.random), HB.newBlock('push', 15, Math.random)] }), 'str_up');   // 15 min > 10 min
     eq(HB.catOf({ blocks: [HB.newBlock('mobility', 15, Math.random), HB.newBlock('core', 10, Math.random)] }), 'mob');
+    eq(HB.catOf({ blocks: [HB.newBlock('warmup', 10, Math.random), HB.newBlock('core', 10, Math.random), HB.newBlock('cooldown', 10, Math.random)] }), 'str_low');   // warm-up + cool-down (20 min) don't outvote the work
     eq(HB.newBlock('nope', 10, Math.random), null); eq(HB.newBlock('core', 20, Math.random), null);
+    eq(HB.newBlock('warmup', 15, Math.random), null);                                      // warm-up / cool-down exist only as 10-minute blocks
+  });
+  test('blocks: every suggestion is warm-up, main 15, main 10, easy finish = 45:00, with different muscle groups, and no advice', () => {
+    for (let i = 0; i < 300; i++) {
+      const d = HB.suggest(Math.random, { preferCat: [null, 'str_up', 'str_low'][i % 3] });
+      eq(d.blocks.map((b) => b.mins), [10, 15, 10, 10]); eq(HB.totalMin(d), 45);
+      const th = d.blocks.map((b) => HB.theme(b.theme));
+      eq(th[0].role, 'warmup'); eq(th[3].role, 'cooldown'); eq(th[1].role, 'main'); eq(th[2].role, 'main');
+      eq(th[1].group !== th[2].group, true, 'groups differ');
+      eq(th[1].group !== 'core', true, 'core never leads');
+      eq(HB.advice(d), []);
+      eq(HW.compile(HB.buildPlan(d)).totalMs, 45 * 60000);
+    }
+    for (let i = 0; i < 40; i++) eq(HB.theme(HB.suggest(Math.random, { preferCat: 'str_low' }).blocks[1].theme).group, 'lower');
+    for (let i = 0; i < 40; i++) eq(['push', 'pull'].includes(HB.theme(HB.suggest(Math.random, { preferCat: 'str_up' }).blocks[1].theme).group), true);
+    for (let i = 0; i < 40; i++) eq(HB.suggest(Math.random, { avoid: ['push', 'pull'] }).blocks[1].theme, 'legs');          // avoids last time's lead
+    eq(HB.suggest(Math.random, { preferCat: 'str_low', avoid: ['legs'] }).blocks[1].theme, 'legs');                          // ...unless there is no alternative
+  });
+  test('blocks: advice flags a missing warm-up / easy finish, same group twice, core before strength, wrong total', () => {
+    const b = (t, m) => HB.newBlock(t, m, Math.random);
+    const has = (d, word) => HB.advice(d).some((x) => x.includes(word));
+    eq(has({ blocks: [b('push', 15), b('pull', 10), b('cooldown', 10)] }, 'חימום'), true);
+    eq(has({ blocks: [b('warmup', 10), b('push', 15), b('pull', 10)] }, 'קליל'), true);
+    eq(has({ blocks: [b('warmup', 10), b('push', 15), b('push', 10), b('cooldown', 10)] }, 'אותה קבוצת'), true);
+    eq(has({ blocks: [b('warmup', 10), b('core', 10), b('legs', 15), b('cooldown', 10)] }, 'ליבה'), true);
+    eq(has({ blocks: [b('warmup', 10), b('push', 15), b('cooldown', 10)] }, 'מעל') || has({ blocks: [b('warmup', 10), b('push', 15), b('cooldown', 10)] }, 'חסרות'), true);
+    eq(HB.advice({ blocks: [] }), []);
   });
   test('store: homeCustom round-trips, junk is cleaned, a save without it loads as null, a custom run needs its draft', () => {
     const d = mk(15, 10); HB.toggleLock(d.blocks[0], 1);

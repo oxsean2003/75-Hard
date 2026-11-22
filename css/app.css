@@ -486,3 +486,8 @@ body.player-open { overflow: hidden; }
 .bl-add { display: grid; gap: 8px; margin: 12px 0; }
 .bl-status { color: var(--muted); font-size: 14px; }
 .bl-status.ok { color: var(--accent); font-weight: 800; }
+.bl-role { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-inline-end: 6px; vertical-align: middle; }
+.bl-block.role-warmup, .bl-block.role-cooldown { border-style: dashed; }
+.bl-why { margin: 8px 0; padding: 0 18px 0 0; line-height: 1.45; font-size: 14px; }
+.bl-why li { margin: 8px 0; }
+.bl-principles summary { font-weight: 800; }

@@ -20,6 +20,7 @@
   try { ui.sound = root.localStorage.getItem(SOUND_KEY) !== '0'; ui.loud = root.localStorage.getItem(LOUD_KEY) === '1'; } catch (e) { /* storage unavailable: keep the defaults */ }
 
   const HB = HomeBlocks;
+  let wireFresh = null;                                          // set in wire(): builds a new suggested workout
   const draftOf = (app) => app.state.homeCustom || (app.state.homeCustom = { blocks: [] });
   // 'custom' = the user's own block workout, built from the draft stored in state.homeCustom
   const planOf = (id) => id === HB.CUSTOM_ID ? HB.buildPlan(root.App && root.App.state.homeCustom) : PLANS.find((p) => p.id === id);
@@ -218,40 +219,59 @@
         ${root.navigator.audioSession ? `<button class="btn mini" data-act="plLoud">${ui.loud ? 'גם במצב שקט: פועל' : 'גם במצב שקט: כבוי'}</button>` : ''}
       </div>
       <p class="pl-tip" id="plTestMsg">לא שומעים? ודאו שמתג הצלצול בצד האייפון לא על שקט (בלי פס כתום) והעלו עוצמה. כשמוזיקה (ספוטיפיי) מנגנת ברקע, ייתכן שלא תשמעו צפצופים: ההבהוב והטיימר עדיין עובדים.</p>
-      ${plan.id === HB.CUSTOM_ID ? '<button class="btn big" data-act="blEdit">ערוך בלוקים</button>' : ''}
+      ${plan.id === HB.CUSTOM_ID ? '<button class="btn big" data-act="blEdit">שנה תרגילים</button>' : ''}
       <button class="btn primary big" data-act="plStart">התחל</button></div>`;
   }
 
-  // ---------- the builder (custom workout) ----------
+  // ---------- the builder (custom workout): a SUGGESTED 45-minute workout; the user only swaps single exercises ----------
+  const ROLE = {
+    warmup: { label: 'חימום', why: 'מעלים דופק, מגייסים מפרקים ומפעילים שרירים לפני העומס.' },
+    main: { label: 'עיקרי', why: '' },
+    cooldown: { label: 'סיום קליל', why: 'מורידים דופק ונשימה בהדרגה ומסיימים ברוגע.' }
+  };
+  const MAIN_WHY = {
+    first: 'הבלוק החשוב והמאתגר ביותר, בתחילת העבודה כשהגוף רענן.',
+    next: 'קבוצת שרירים אחרת מהבלוק הקודם, כך שהם נחים בזמן שאלה עובדים.',
+    core: 'ליבה אחרי הכוח, כדי לא לעייף את המייצבים לפני העבודה הכבדה.'
+  };
+  function whyOf(d, bi) {
+    const th = HB.theme(d.blocks[bi].theme);
+    if (th.role !== 'main') return ROLE[th.role].why;
+    if (th.group === 'core') return MAIN_WHY.core;
+    return d.blocks.findIndex((b) => HB.theme(b.theme).role === 'main') === bi ? MAIN_WHY.first : MAIN_WHY.next;
+  }
+  const PRINCIPLES = `<ul class="bl-why">
+    <li><b>חימום בהתחלה:</b> מעלים דופק, מגייסים מפרקים, מפעילים שרירים ומכינים לעומס (מודל RAMP של איאן ג׳פריס). חימום דינמי עדיף לפני כוח: מתיחות סטטיות ארוכות עלולות להוריד כוח זמנית במחקרים מסוימים.</li>
+    <li><b>החשוב והמאתגר קודם:</b> במטא-אנליזה של 11 מחקרים (2021) הכוח עלה הכי הרבה בתרגילים שבוצעו בתחילת האימון. לכן הבלוק הגדול ראשון.</li>
+    <li><b>מחליפים קבוצות שרירים:</b> דחיפה ואז משיכה, או גוף עליון ואז תחתון, כך שקבוצה אחת נחה בזמן שהשנייה עובדת (הנחיות NSCA).</li>
+    <li><b>ליבה אחרי הכוח:</b> זה נוהג מקובל בקרב מאמנים. לא מצאתי מחקר ישיר על המיקום הנכון, אז זו המלצה ולא עובדה.</li>
+    <li><b>סיום קליל:</b> סקירות מראות שלסיום הדרגתי יש השפעה צנועה: הוא לא משפר ביצועים, לא מונע פציעות ולא מפחית כאבי שרירים. מה שהוא כן עושה זה להוריד דופק ונשימה ולהרגיש טוב. לכן הוא מוגבל ל-10 דקות מתוך 45.</li>
+  </ul><p class="note-l">הסדר הזה הוא הצעה לפי הממצאים, לא כלל מחייב. אם משהו לא מתאים, החליפו תרגיל או בקשו הצעה חדשה.</p>`;
+
   function buildHtml(app) {
     const { esc } = app, d = draftOf(app), total = HB.totalMin(d);
-    const gap = TARGET_MIN - total;
-    const status = !d.blocks.length ? 'הוסיפו בלוקים של 10 או 15 דקות. לדוגמה 15+15+15 או 15+10+10+10 = 45.'
-      : gap === 0 ? 'בול 45 דקות ✓' : gap > 0 ? `חסרות ${gap} דקות ל-45` : `${-gap} דקות מעל 45`;
+    const tips = HB.advice(d);
     const blocks = d.blocks.map((b, bi) => {
-      const th = HB.theme(b.theme);
+      const th = HB.theme(b.theme), role = ROLE[th.role] || ROLE.main;
       const rows = HB.slotsFor(b).map((s, si) => {
-        const opt = s.options[b.picks[si]], locked = b.locks[si];
-        return `<li class="bl-slot${locked ? ' locked' : ''}"><small>${esc(s.name)}</small>
-          <select data-change="blPick" data-b="${bi}" data-s="${si}" ${locked ? 'disabled' : ''} aria-label="${esc(s.name)}">${s.options.map((x, xi) => `<option value="${xi}"${xi === b.picks[si] ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+        const opt = s.options[b.picks[si]];
+        return `<li class="bl-slot"><small>${esc(s.name)}</small>
+          <select data-change="blPick" data-b="${bi}" data-s="${si}" aria-label="${esc(s.name)}">${s.options.map((x, xi) => `<option value="${xi}"${xi === b.picks[si] ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
           ${opt.note ? `<p>${esc(opt.note)}</p>` : ''}
-          <div class="bl-btns"><button class="btn mini" data-act="blRoll" data-b="${bi}" data-s="${si}" ${locked ? 'disabled' : ''}>החלף</button>
-          <button class="btn mini${locked ? ' primary' : ''}" data-act="blLock" data-b="${bi}" data-s="${si}">${locked ? 'נעול · שחרר' : 'נעל'}</button></div></li>`;
+          <div class="bl-btns"><button class="btn mini" data-act="blRoll" data-b="${bi}" data-s="${si}">החלף</button></div></li>`;
       }).join('');
-      return `<section class="pl-sec bl-block"><h3>בלוק ${bi + 1}: ${esc(th.name)} <small>${b.mins} דק׳</small></h3>
-        <div class="bl-btns"><button class="btn mini" data-act="blShuffle" data-b="${bi}">ערבב את הלא-נעולים</button><button class="btn mini" data-act="blRemove" data-b="${bi}">הסר בלוק</button></div>
+      return `<section class="pl-sec bl-block role-${th.role}"><h3><span class="bl-role">${esc(role.label)}</span> ${th.role === 'main' ? esc(th.name) : ''} <small>${b.mins} דק׳</small></h3>
+        <p class="pl-rounds">${esc(whyOf(d, bi))}</p>
         <ul class="bl-slots">${rows}</ul></section>`;
     }).join('');
-    const full = d.blocks.length >= HB.MAX_BLOCKS;
     return `<div class="pl-wrap">
       <div class="pl-top"><button class="pl-x" data-act="plClose" aria-label="סגירה">✕</button><h1>אימון מותאם</h1></div>
-      <p class="pl-note">בחרו בלוקים של 10 או 15 דקות, החליפו תרגילים, ונעלו את מה שמוצא חן בעיניכם. אחר כך זה אימון רגיל עם טיימר.</p>
-      <div class="pl-meta"><b>${total} דק׳</b> <span class="bl-status${gap === 0 && total ? ' ok' : ''}">${esc(status)}</span></div>
+      <p class="pl-note">הכנו לכם אימון לפי עקרונות בנייה מקובלים: חימום, בלוקים עיקריים וסיום קליל. אפשר להחליף כל תרגיל, או לבקש הצעה חדשה.</p>
+      <div class="pl-meta"><b>${total} דק׳</b></div>
+      ${tips.length ? `<div class="banner warn">${tips.map((t) => `<p>${esc(t)}</p>`).join('')}<button class="btn mini" data-act="blSuggest">הצעה חדשה</button></div>` : ''}
       ${blocks}
-      <div class="bl-add"><select id="blTheme" aria-label="נושא הבלוק">${HB.THEMES.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>
-        <div class="bl-btns"><button class="btn" data-act="blAdd" data-mins="10" ${full ? 'disabled' : ''}>+ בלוק 10 דק׳</button>
-        <button class="btn" data-act="blAdd" data-mins="15" ${full ? 'disabled' : ''}>+ בלוק 15 דק׳</button></div></div>
-      ${d.blocks.length ? '<button class="btn" data-act="blShuffleAll">ערבב הכל (חוץ מהנעולים)</button>' : ''}
+      <details class="card bl-principles"><summary>למה בנינו את זה ככה?</summary>${PRINCIPLES}</details>
+      <button class="btn" data-act="blSuggest">הצעה חדשה</button>
       <button class="btn primary big" data-act="blDone" ${d.blocks.length ? '' : 'disabled'}>הכן אימון (${total} דק׳)</button></div>`;
   }
 
@@ -353,6 +373,8 @@
   }
 
   function show(app, planId) {
+    if (planId === HB.CUSTOM_ID && wireFresh && !(app.state.homeRun && app.state.homeRun.planId === planId)
+      && !(app.state.homeCustom && app.state.homeCustom.blocks.length)) { wireFresh(); app.commit(); }    // first time: start from a suggestion
     const plan = planOf(planId);
     if (!plan) return;
     ui.planId = planId; ui.c = HW.compile(plan); ui.confirmStop = false; ui.lastIndex = -1;
@@ -483,18 +505,18 @@
     const rng = () => Math.random();
     const edit = (fn) => { fn(draftOf(app)); app.commit(); render(app); };
     const blk = (d, el) => d.blocks[Number(el.dataset.b)];
-    app.act('blAdd', (el) => edit((d) => {
-      const sel = document.getElementById('blTheme');
-      if (d.blocks.length >= HB.MAX_BLOCKS) return;
-      const b = HB.newBlock(sel && sel.value, Number(el.dataset.mins), rng);
-      if (b) d.blocks.push(b);
-    }));
-    app.act('blRemove', (el) => edit((d) => { d.blocks.splice(Number(el.dataset.b), 1); }));
+    // a new suggested workout; leads with what the weekly quota needs, and not with last time's lead block
+    const fresh = () => {
+      const d = draftOf(app), today = app.status().today;
+      let preferCat = null;
+      try { const ef = Training.effective(app.state, today, 'w1'); preferCat = ef && (ef.cat === 'str_up' || ef.cat === 'str_low') ? ef.cat : null; } catch (e) { /* no preference */ }
+      const lead = d.blocks.length > 1 ? [d.blocks[1].theme] : [];
+      app.state.homeCustom = HB.suggest(rng, { preferCat, avoid: lead });
+    };
+    wireFresh = fresh;
     app.act('blRoll', (el) => edit((d) => { const b = blk(d, el); if (b) HB.reroll(b, Number(el.dataset.s), rng); }));
-    app.act('blLock', (el) => edit((d) => { const b = blk(d, el); if (b) HB.toggleLock(b, Number(el.dataset.s)); }));
-    app.act('blShuffle', (el) => edit((d) => { const b = blk(d, el); if (b) HB.shuffleBlock(b, rng); }));
-    app.act('blShuffleAll', () => edit((d) => HB.shuffleAll(d, rng)));
     app.act('blPick', (el) => edit((d) => { const b = blk(d, el); if (b) HB.setPick(b, Number(el.dataset.s), Number(el.value)); }));
+    app.act('blSuggest', () => { fresh(); app.commit(); render(app); });
     app.act('blEdit', () => { ui.view = 'build'; render(app); });
     app.act('blDone', () => {
       const d = draftOf(app); if (!d.blocks.length) return;
